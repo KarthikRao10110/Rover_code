@@ -39,6 +39,12 @@ Face controls: **Space** or **tap the screen** = stop moving + stop talking (+ s
   without the name for 15 s. In debate mode no name is needed.
 - **Strict turn-taking:** you talk, it answers, then it listens again. The mic is muted while it
   speaks and anything said while it's thinking is ignored. Only **"stop"** always gets through.
+- **Shut down:** "Rover, shut down" (also "shutdown", "power off", "turn yourself off",
+  "close the app") says bye and closes the whole app, like `./stop_rover.sh`.
+- **Debates always confirm the topic first:** "start a debate" → "What should we debate about?" →
+  you name it → "Just to check, you want to debate: … Shall we start?" → **yes** starts it,
+  **no** (or "no, <other topic>") changes it, "never mind" cancels. Unclear answers (background
+  noise) get re-asked; after 3 it gives up, and an unanswered question expires after 40 s.
 - Plain driving commands ("go forward one metre", "turn left", "spin twice", "come here",
   "what's in front of you") are executed instantly without the LLM.
 - Anything else goes to the LLM, which can drive itself with tools (below).
@@ -78,8 +84,9 @@ still speak out loud for the audience. One talks at a time: while one is speakin
 already writing its answer, and starts talking as soon as the first one finishes.
 
 Start one:
-- by voice: "Rover, debate Nova about whether homework should be banned" (add "you argue against"
-  to swap sides), or
+- by voice: "Rover, start pair debate" (also "robot debate", "debate each other", or
+  "Rover, debate Nova about whether homework should be banned"; add "you argue against" to swap
+  sides). It asks for / repeats the topic and starts only after you say **yes**, or
 - from a terminal on either robot: `.venv/bin/python -m tools.debate "Homework should be banned"`
   (`--side against`, `--stop`).
 

@@ -59,7 +59,7 @@ class RobotDebate:
         if not (link and link.configured()):
             return "error: I don't know where the other robot is. Set PEER_NAME and PEER_HOST in local_config.py."
         topic = (topic or "").strip(" .?!")
-        if len(topic.split()) < 2:
+        if not topic:                      # (voice requests are confirmed in agent.py first)
             return "error: I need a topic first. What should we debate about?"
         if self.active:
             return "error: We're already debating."

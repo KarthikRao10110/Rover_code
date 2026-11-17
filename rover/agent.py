@@ -207,8 +207,47 @@ def _peer_re():
 
 
 RE_PEER = _peer_re()
-RE_TOPIC = re.compile(r"\b(?:about|on|over|regarding|whether|topic(?: is)?:?)\s+(.+)$", re.I)
+RE_TOPIC = re.compile(r"\b(?:about|on|over|regarding|whether|that|topic(?: is)?:?)\s+(.+)$", re.I)
 RE_SIDE_AGAINST = re.compile(r"\byou (?:argue|take|are|be|go) (?:the )?(?:against|no|con|negative|opposing)\b", re.I)
+# "start pair debate", "robot debate", "debate each other" -> robot vs robot
+# (speech recognition often hears "pair" as "pear" / "peer" / "bear")
+RE_PAIR = re.compile(r"\b(pair|pear|peer|paired|bear|robots?)\s+debat\w*\b|\bdebate\s+(with\s+)?each other\b", re.I)
+
+# --- confirming the debate topic before starting (background noise used to become the topic)
+SETUP_TIMEOUT_S = 40                 # no answer for this long -> forget the half-started debate
+SETUP_MAX_TRIES = 3                  # unclear answers before giving up
+RE_YES = re.compile(r"^\W*(yes|yeah|yea|yep|yup|ya|sure|correct|right|that's right|exactly|ok|okay|"
+                    r"go|go ahead|start|start it|do it|let's go|lets go|let's do it|absolutely|"
+                    r"of course|confirm|confirmed|perfect|sounds good)\b", re.I)
+RE_NO = re.compile(r"^\W*(no|nope|nah|not that|wrong|change it|different)\b\W*", re.I)
+RE_CANCEL = re.compile(r"\b(cancel|never ?mind|forget it|no debate|don't debate|not now|stop)\b", re.I)
+TOPIC_JUNK = {"start", "begin", "a", "an", "the", "debate", "debating", "debates", "pair", "pear", "peer",
+              "bear", "robot", "robots", "with", "mode", "please", "let's", "lets", "let", "us", "now",
+              "okay", "ok", "do", "have", "go", "and", "me", "you", "we", "i", "to", "for", "about", "on",
+              "each", "other", "yes", "no", "um", "uh", "hey", "hi", "hello", "can", "could", "want",
+              "wanna", "should", "shall", "new", "topic", "it", "this", "that", "some", "something"}
+TOPIC_JUNK |= {w.lower() for w in config.WAKE_WORDS + [config.ROBOT_NAME, config.PEER_NAME or ""] if w}
+
+
+def clean_topic(text):
+    """Drop wake words and filler around a topic: 'Nova, homework should be banned.' -> 'homework should be banned'."""
+    t = RE_WAKE.sub("", text or "")
+    return re.sub(r"\s+", " ", t).strip(" ,.;:!?\"'")
+
+
+def valid_topic(topic):
+    """At least one real word that isn't a command/filler word ('start a debate' is not a topic)."""
+    words = re.findall(r"[a-z']+", (topic or "").lower())
+    return any(w not in TOPIC_JUNK for w in words)
+
+
+# "Nova, shut down" / "shutdown" / "power off" / "close the app": closes the rover app
+_WAKE_ALT = "|".join(map(re.escape, config.WAKE_WORDS + ["robot"]))
+RE_SHUTDOWN = re.compile(
+    rf"^\W*(?:(?:hey|ok|okay)\W+)?(?:(?:{_WAKE_ALT})\W+)?(?:please\W+)?"
+    r"(?:shut\s*down|power\s+(?:off|down)|turn\s+(?:yourself\s+)?off|switch\s+(?:yourself\s+)?off|"
+    r"close\s+(?:the\s+|your\s+)?app|exit\s+(?:the\s+)?app|quit\s+(?:the\s+)?app)"
+    rf"(?:\W+(?:now|please|yourself))*(?:\W+(?:{_WAKE_ALT}))?\W*$", re.I)
 
 DANGLING = {"and", "but", "or", "so", "because", "the", "a", "an", "to", "of", "that", "if", "why",
             "what", "how", "when", "where", "who", "which", "is", "are", "was", "think", "like", "with",
@@ -303,7 +342,8 @@ class Agent:
         self._pending_timer = None
         self._pending_lock = threading.Lock()
         self._awake_until = 0.0
-        self._await_topic = None             # asked "what should we debate?": holds my side
+        self._setup = None                   # debate being set up: asking for / confirming the topic
+        self.on_shutdown = None              # set by main.py: closes the whole app
         from .robot_debate import RobotDebate
         self.robot_debate = RobotDebate(self)
         self._update_hint()
@@ -316,7 +356,7 @@ class Agent:
         """Wake word not needed: right after a reply, in debate mode, or when disabled."""
         sp = self.speaker
         last = max(self._awake_until, sp.last_spoke + config.WAKE_WINDOW_S)
-        return (not self.wake_word or self.state.mode != "normal" or self._await_topic is not None
+        return (not self.wake_word or self.state.mode != "normal" or self._setup is not None
                 or sp.speaking() or time.monotonic() < last)
 
     def _update_hint(self):
@@ -356,7 +396,8 @@ class Agent:
     def hear(self, text):
         """Called by the listener thread for every transcript."""
         text = text.strip()
-        if not text or RE_FILLER.match(text):
+        # a bare "yes"/"no" is filler normally, but it's the answer while confirming a debate topic
+        if not text or (RE_FILLER.match(text) and self._setup is None):
             return
         if self._is_self_echo(text):
             self.log(f"[echo ignored] {text}")
@@ -368,6 +409,9 @@ class Agent:
             self.state.user_text = text
             self.speaker.new_turn()
             self.speaker.say("Okay, I've stopped the debate." if debating else "Stopping.")
+            return
+        if RE_SHUTDOWN.match(text) and (self.awake() or RE_WAKE.search(text)):
+            self.shutdown_app(f'heard "{text}"')
             return
         if self.robot_debate.active:
             return                      # the other robot talking, or the audience: not for us
@@ -405,6 +449,7 @@ class Agent:
         self._interrupt.set()
         self.llm.cancel()
         self.speaker.cancel()
+        self._setup = None                  # "stop" also drops a half-set-up debate
         if self.robot_debate.active:
             self.robot_debate.stop(notify_peer=True)
         while not self.inbox.empty():
@@ -446,22 +491,21 @@ class Agent:
         self.speaker.new_turn()
         self.log(f"[user] {text}")
 
-        if self._await_topic is not None:          # "what should we debate?" -> this is the topic
-            side, self._await_topic = self._await_topic, None
-            topic = extract_topic(text) or text.strip(" .?!")
-            self.start_robot_debate(topic, side)
-            return
-
-        # robot vs robot debate ("Rover, debate Nova about homework")
-        if (st.mode == "normal" and self.link and self.link.configured() and RE_DEBATE_ON.search(text)
-                and RE_PEER.search(text)):
-            side = "against" if RE_SIDE_AGAINST.search(text) else "for"
-            topic = extract_topic(text)
-            if len(topic.split()) < 2:
-                self._await_topic = side
-                self.speaker.say(f"Sure! What should {config.PEER_NAME} and I debate about?")
+        if self._setup is not None:               # asking for / confirming a debate topic
+            if time.monotonic() - self._setup["asked"] > SETUP_TIMEOUT_S:
+                self.log("[debate setup] no answer in time, dropped")
+                self._setup = None
+            else:
+                self._continue_setup(text)
                 return
-            self.start_robot_debate(topic, side)
+
+        # robot vs robot debate ("Rover, debate Nova about homework", "start pair debate")
+        if st.mode == "normal" and (RE_PAIR.search(text) or (RE_DEBATE_ON.search(text) and RE_PEER.search(text))):
+            if not (self.link and self.link.configured()):
+                self.speaker.say("I don't know where the other robot is, so I can't start a pair debate.")
+                return
+            side = "against" if RE_SIDE_AGAINST.search(text) else "for"
+            self._begin_setup("robot", extract_topic(text), side)
             return
 
         # keyword mode switches (instant, no LLM needed to decide)
@@ -471,14 +515,116 @@ class Agent:
             self.set_mode("normal")
             return
         if st.mode == "normal" and RE_DEBATE_ON.search(text) and not RE_DEBATE_OFF.search(text):
-            self.set_mode("debate", topic=text)
-        else:
-            cmds = commands.parse(text)
-            if cmds:
-                self._run_commands(text, cmds)
-                return
+            self._begin_setup("person", extract_topic(text))
+            return
+        cmds = commands.parse(text)
+        if cmds:
+            self._run_commands(text, cmds)
+            return
 
         self._respond(text)
+
+    # ---- setting up a debate: get the topic and have the user confirm it ----------------
+    def _setup_say(self, msg):
+        self.log(f"[debate setup] {msg}")
+        self.speaker.say(msg)
+        if self._setup is not None:
+            self._setup["asked"] = time.monotonic()
+
+    def _begin_setup(self, kind, topic="", side="for"):
+        """kind: 'robot' (vs the other robot) or 'person' (vs the user). Never starts a debate
+        directly: the topic is always confirmed first, so noise can't become the topic."""
+        self._setup = {"kind": kind, "side": side, "topic": "", "tries": 0, "asked": time.monotonic()}
+        topic = clean_topic(topic)
+        if valid_topic(topic):
+            self._ask_confirm(topic)
+        else:
+            self._ask_topic()
+        return "ok: asked the user to confirm the debate topic. Say nothing more."
+
+    def _ask_topic(self, again=False):
+        s = self._setup
+        s["topic"] = ""
+        who = f"{config.PEER_NAME} and I" if s["kind"] == "robot" else "we"
+        lead = "Sorry, I didn't catch a topic. " if again else "Sure! "
+        self._setup_say(f"{lead}What should {who} debate about?")
+
+    def _ask_confirm(self, topic, again=False):
+        s = self._setup
+        s["topic"] = topic
+        if again:
+            self._setup_say(f"Should I start the debate on: {topic}? Please say yes or no.")
+        elif s["kind"] == "robot":
+            self._setup_say(f"Just to check, {config.PEER_NAME} and I will debate: {topic}. Shall I start?")
+        else:
+            self._setup_say(f"Just to check, you want to debate: {topic}. Shall we start?")
+
+    def _give_up_setup(self, msg="Okay, no debate then."):
+        self._setup = None
+        self.log(f"[debate setup] {msg}")
+        self.speaker.say(msg)
+
+    def _continue_setup(self, text):
+        s = self._setup
+        t = clean_topic(text)
+        if RE_CANCEL.search(t):
+            self._give_up_setup()
+            return
+        if not s["topic"]:                        # waiting for a topic
+            topic = clean_topic(extract_topic(t) or t)
+            if valid_topic(topic):
+                self._ask_confirm(topic)
+                return
+            s["tries"] += 1
+            if s["tries"] >= SETUP_MAX_TRIES:
+                self._give_up_setup("I'll skip the debate for now. Just ask again when you're ready.")
+            else:
+                self._ask_topic(again=True)
+            return
+        if RE_YES.match(t):                       # confirmed
+            self._setup = None
+            self._start_debate(s)
+            return
+        if RE_NO.match(t):                        # "no" or "no, school uniforms"
+            rest = clean_topic(extract_topic(t) or RE_NO.sub("", t, count=1))
+            if valid_topic(rest):
+                self._ask_confirm(rest)
+            else:
+                s["topic"] = ""
+                self._setup_say("Okay. What should the topic be instead?")
+            return
+        s["tries"] += 1                           # unclear answer (or background noise)
+        if s["tries"] >= SETUP_MAX_TRIES:
+            self._give_up_setup("I'll skip the debate for now. Just ask again when you're ready.")
+        else:
+            self._ask_confirm(s["topic"], again=True)
+
+    def _start_debate(self, s):
+        self.log(f"[debate setup] confirmed: {s['kind']} debate on '{s['topic']}'")
+        if s["kind"] == "robot":
+            self.start_robot_debate(s["topic"], s["side"])
+            return
+        self.set_mode("debate", topic=s["topic"])
+        self.speaker.say(f"Great, let's debate: {s['topic']}. Tell me your side, and I'll argue the other one.")
+
+    # ---- shutdown command -------------------------------------------------------------
+    def shutdown_app(self, reason=""):
+        """Say goodbye, then close the whole rover app (motors off, other robot told)."""
+        self.log(f"[shutdown] {reason}")
+        self.interrupt("shutdown")
+        self.speaker.new_turn()
+        self.speaker.say("Okay, shutting down. Bye!")
+
+        def finish():
+            time.sleep(0.3)
+            end = time.monotonic() + 8
+            while self.speaker.speaking() and time.monotonic() < end:
+                time.sleep(0.1)
+            if self.on_shutdown:
+                self.on_shutdown()
+            else:
+                self.state.alive = False
+        threading.Thread(target=finish, name="shutdown", daemon=True).start()
 
     def start_robot_debate(self, topic, side="for"):
         msg = self.robot_debate.start_as_host(topic, side)
@@ -695,8 +841,8 @@ class Agent:
                 result = self.run_tool(c["name"], c["args"])
                 self.log(f"[tool] {c['name']}({c['args']}) -> {result}")
                 convo.append({"role": "tool", "tool_call_id": c["id"], "content": result})
-            if self.robot_debate.active:
-                return
+            if self.robot_debate.active or self._setup is not None:
+                return                          # debate starting / topic question asked: turn is over
             if st.mode != start_mode:
                 if st.mode == "debate":
                     # switched into debate mid-turn: answer the same message as a debater
@@ -746,9 +892,11 @@ class Agent:
         args = args or {}
         try:
             if name == "set_mode":
+                if args.get("mode") == "debate" and self.state.mode != "debate":
+                    return self._begin_setup("person", args.get("topic") or "")   # confirm topic first
                 return self.set_mode(args.get("mode", "normal"), args.get("topic"))
             if name == "start_robot_debate":
-                return self.start_robot_debate(args.get("topic", ""), args.get("my_side", "for"))
+                return self._begin_setup("robot", args.get("topic") or "", args.get("my_side", "for"))
             if name in ("read_sensors", "read_distances"):
                 if not self.sensors:
                     return "no distance sensors are connected"
