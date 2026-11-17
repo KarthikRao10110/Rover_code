@@ -1,0 +1,10 @@
+# big / machine-specific: not in git
+.venv/
+models/
+logs/
+__pycache__/
+*.pyc
+.lgd-nfy*
+.claude/
+# each robot has its own settings (see rover/local_config.example.py)
+rover/local_config.py
