@@ -107,6 +107,7 @@ def main():
             link = PeerLink(on_message=lambda m: parts["agent"].robot_debate.on_message(m), log=log)
             agent = Agent(state, speaker, rover, sensors, link=link,
                           wake_word=config.WAKE_WORD and not args.no_wake_word, log=log)
+            agent.on_shutdown = shutdown         # voice command "shut down" closes the app
             parts["agent"] = agent
             # Warm up ALL prompt caches before saying "ready" or accepting a robot debate.
             # (Warming the debate slots in the background after "ready" made the first question
