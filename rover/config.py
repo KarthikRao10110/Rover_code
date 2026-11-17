@@ -107,6 +107,8 @@ MIC_SILENT_TIMEOUT_S = 3.0           # no audio data at all for this long -> mic
 # Strictly one at a time: the mic is muted while the robot talks and anything heard while it is
 # thinking is dropped (except "stop"). There is no talking over the robot.
 PARTIAL_EVERY_S = 0.8                # live transcript refresh while you speak
+STT_THREADS = 3                      # Parakeet threads: 3 is fastest on a Pi 5 (4 is no faster, and fights the LLM)
+BUSY_MAX_PHRASE_S = 3.0              # while thinking/debating, skip phrases longer than this (only "stop" matters)
 SAVE_UTTERANCES = True               # keep the last 30 heard phrases in logs/utterances/ (debugging STT)
 
 # --- Robot vs robot debate -------------------------------------------------------------
