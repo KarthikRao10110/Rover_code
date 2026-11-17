@@ -196,7 +196,7 @@ class RobotDebate:
             return self._cond.wait_for(lambda: gen != self._gen or self._spoken >= t - 1, timeout)
 
     def _take_turn(self, t, opponent_text, gen):
-        from .agent import split_sentences, RE_TOOL_LEAK
+        from .agent import split_sentences, RE_TOOL_LEAK, RE_END_OF_SENTENCE
         a, sp = self.agent, self.agent.speaker
         self.history.append({"role": "user", "content": self._message(t, opponent_text)})
         convo = self.history[-8:]
@@ -219,18 +219,26 @@ class RobotDebate:
 
         try:
             for kind, val in a.llm.stream(messages, slot=config.SLOT_ROBOT_DEBATE, temperature=0.8,
-                                          max_tokens=int(config.ROBOT_DEBATE_WORDS * 1.9)):
+                                          max_tokens=int(config.ROBOT_DEBATE_WORDS * 2.5)):
                 if gen != self._gen:
                     a.llm.cancel()
                     return
                 if kind == "text":
                     buf += val
                     sentences, buf = split_sentences(buf, first)
+                    done = False
                     for s in sentences:
                         if not RE_TOOL_LEAK.search(s):
                             pending.append(s)
                             first = False
+                            if RE_END_OF_SENTENCE.search(s):
+                                done = True       # debate turns are one sentence only
+                                break
                     flush()
+                    if done:
+                        a.llm.cancel()
+                        buf = ""
+                        break
                 elif kind == "done":
                     finish = (val.get("timings") or {}).get("finish_reason")
                     tm = val.get("timings") or {}

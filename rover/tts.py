@@ -75,7 +75,8 @@ class Speaker:
         so.inter_op_num_threads = 1
         self.voice.session = ort.InferenceSession(config.TTS_VOICE, sess_options=so,
                                                   providers=["CPUExecutionProvider"])
-        self.syn = SynthesisConfig(length_scale=config.TTS_SPEED)
+        self.syn = SynthesisConfig(length_scale=config.TTS_SPEED, noise_scale=config.TTS_EXPRESSION,
+                                   noise_w_scale=config.TTS_RHYTHM)  # livelier, less "announcement"
         self.rate = self.voice.config.sample_rate
         self.on_state = on_state or (lambda speaking: None)
         self._text_q = queue.Queue()

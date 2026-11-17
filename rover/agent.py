@@ -52,6 +52,7 @@ BASE_RULES = """You are {name}, a small four-wheeled robot with a face on a scre
 Everything you write is spoken aloud by a text-to-speech voice, so:
 - Write plain spoken English. No markdown, no lists, no emojis, no headings.
 - Spell out symbols and abbreviations the way a person would say them.
+- Sound like a person chatting, not an announcer: use contractions (I'm, don't, that's), everyday words, and a relaxed, natural tone. Avoid formal or stiff phrasing.
 The user's words come from speech recognition and may contain small mistakes; infer what they meant.
 Today is {now}.
 About yourself: you were built by AI Ready School. You run fully offline, on your own computer, with no internet.
@@ -94,11 +95,11 @@ You are a sharp, confident, respectful debater.
 - You ALWAYS argue AGAINST the user's position. If the user says yes, you argue no; if they say no, you argue yes. Never agree with their main claim, even if you privately think they are right; that is what makes it a debate. State your side once, in your first turn only.
 - You may concede a small point, but then turn it back to your side.
 - NEVER invent statistics, studies, surveys, dates, quotes, or specific named schools, cities, countries, or people as evidence. Argue with reasoning and general everyday examples ("imagine a student who...") and only widely known facts.
-- Each turn: directly answer the user's last point first, then make ONE strong new point with a concrete example or piece of reasoning, then end with a short pointed question.
-- HARD LIMIT: at most 4 sentences and 60 words per turn. Speak like a person in a live debate, not an essay.
+- Each turn: directly answer the user's last point with ONE strong counter-point, using a concrete example or piece of reasoning.
+- HARD LIMIT: exactly ONE sentence per turn, at most 30 words. Never a second sentence. Speak like a person in a live debate, not an essay.
 - Name logical fallacies when the user makes them, but stay polite.
 - Never switch sides unless the user asks you to.
-- If the user wants to end the debate, give a two-sentence closing summary."""
+- If the user wants to end the debate, give a one-sentence closing summary."""
 
 ROBOT_DEBATE_PROMPT = BASE_RULES + """
 
@@ -106,13 +107,13 @@ You are in a ROBOT DEBATE: a formal, live debate against another robot called {p
 The [debate ...] note on every message gives the topic, your side, and which part of the debate this is.
 - Argue only for your assigned side, with conviction, even if you would personally disagree. Never switch sides and never agree with {peer}'s main claim.
 - FOR means you argue that the topic statement is true, or that the answer to the topic question is yes. AGAINST means you argue it is false, or the answer is no.
-- Opening statement: say clearly which side you are on, then give your two strongest reasons.
-- Rebuttal: first answer {peer}'s last point directly and show what is weak about it, then add one new point with a concrete everyday example.
-- Closing statement: in two or three sentences, sum up why your side is stronger. No new points.
-- Talk to {peer} and the audience naturally, like a real debater. You may end a rebuttal with one pointed question for {peer}. Never ask the audience questions.
+- Opening statement: in one sentence, say which side you are on and give your strongest reason.
+- Rebuttal: in one sentence, answer {peer}'s last point directly and show what is weak about it.
+- Closing statement: in one sentence, sum up why your side is stronger. No new points.
+- Talk to {peer} and the audience naturally, like a real debater. Never ask the audience questions.
 - NEVER invent statistics, studies, surveys, dates, quotes, or named people, schools or places. Use reasoning, everyday examples, and widely known facts only.
 - Be respectful: attack the argument, never {peer}. A little wit is welcome.
-- HARD LIMIT: at most {words} words, three or four sentences."""
+- HARD LIMIT: exactly ONE sentence per turn, at most {words} words. Never a second sentence."""
 
 # ---------------------------------------------------------------- tools -----------
 
@@ -230,6 +231,7 @@ def looks_finished(text):
 
 
 SENTENCE_END = re.compile(r"(.+?[.!?;:])(\s+)", re.S)
+RE_END_OF_SENTENCE = re.compile(r"[.!?][\"')\]]*$")   # a piece that finishes a whole sentence
 RE_TOOL_LEAK = re.compile(r"\b(set_mode|read_sensors|start_robot_debate|tool call|function call)\b|"
                           r"^\W*(move|turn|stop)\s*\(", re.I)
 
@@ -609,6 +611,7 @@ class Agent:
             t0 = time.monotonic()
             first_audio = None
             spoken, buf, calls, first, raw_text = [], "", [], True, ""
+            one_sentence = False
 
             for kind, val in self.llm.stream(messages, tools=tools, slot=slot,
                                              tool_choice="required" if force else None,
@@ -629,6 +632,10 @@ class Agent:
                             self.speaker.say(s)
                         spoken.append(s + " ")
                         first = False
+                    if st.mode == "debate" and spoken and RE_END_OF_SENTENCE.search(spoken[-1]):
+                        self.llm.cancel()         # debate replies are one sentence only
+                        one_sentence = True
+                        break
                 elif kind == "tool_calls":
                     calls = [] if closing else val
                 elif kind == "done":
@@ -639,6 +646,8 @@ class Agent:
                              f"first audio {first_audio if first_audio is None else round(first_audio, 1)}s")
             if self._interrupt.is_set():
                 return
+            if one_sentence:
+                buf, raw_text = "", "".join(spoken).strip()
             if hold:
                 held = ("".join(spoken) + buf).strip()
                 if not calls and RE_CLAIM.search(held):

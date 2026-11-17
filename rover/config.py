@@ -86,7 +86,9 @@ LLM_THREADS_BATCH = 4
 HISTORY_TURNS = 8                  # user+assistant pairs kept in context
 
 TTS_VOICE = "models/piper/en_US-lessac-medium.onnx"
-TTS_SPEED = 1.0                    # >1 slower, <1 faster (Piper length_scale)
+TTS_SPEED = 0.92                   # >1 slower, <1 faster (Piper length_scale)
+TTS_EXPRESSION = 0.8               # pitch/intonation variation (Piper noise_scale; voice default 0.667)
+TTS_RHYTHM = 1.0                   # timing variation between sounds (Piper noise_w; voice default 0.8)
 CONTINUATION_WAIT_S = 1.5          # unfinished-sounding phrase: wait this long for the rest
 POST_SPEECH_MUTE_S = 0.6           # keep the mic muted briefly after talking (Bluetooth delay + echo tail)
 
@@ -120,7 +122,7 @@ LINK_PORT = 8765                     # both robots listen on this TCP port
 PEER_PORT = None                     # the other robot's port if different (testing two on one Pi)
 LINK_KEY = "change-me"               # shared secret, must be the same on both robots
 ROBOT_DEBATE_ROUNDS = 3              # turns per robot (opening, rebuttal..., closing)
-ROBOT_DEBATE_WORDS = 55              # target length of each turn
+ROBOT_DEBATE_WORDS = 30              # max length of each turn (turns are one sentence)
 
 # --- Per-robot overrides ------------------------------------------------------------------
 # rover/local_config.py (not shared between robots) can override anything above: name, pins,
