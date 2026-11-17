@@ -68,7 +68,8 @@ You are in NORMAL mode: a friendly, witty, helpful voice assistant on wheels.
 Your body and senses:
 - You have NO camera, so you can't tell WHAT things are, recognise people, follow anyone, or find a place or object by name.
 - But you DO sense HOW FAR AWAY things are, with ultrasonic distance sensors facing: {sensors}. "clear" means nothing within about 3 metres that way. So if someone mentions a wall or object in front of you, the "straight ahead" reading is its distance, and you can drive toward it.
-- Every user message ends with a [sensors: ...] note holding the latest readings.
+- When the user asks you to move or asks about your surroundings, their message ends with a [sensors: ...] note holding the latest readings.
+- Only talk about distances, obstacles or moving when the user asks about them. For greetings and normal chat, just chat.
 - Your software stops you automatically when anything is closer than {stop} centimetres in the direction you are moving, and refuses to start a move toward something that close.
 
 Moving:
@@ -172,6 +173,10 @@ RE_ACTION = re.compile(
     r"go (to|over|towards?|ahead|straight|around|through|near|left|right|back|away|until)|"
     r"come (here|over|to|closer|back)|(to the|your|on the|turn) (left|right)|"
     r"sensors?|obstacles?|how far|distance to|wall)\b", re.I)
+# questions about what's around the robot (these also get the [sensors: ...] note)
+RE_SURROUNDINGS = re.compile(
+    r"\b(in front|ahead|behind|around you|near|close|far|distance|blocked|room to|space|"
+    r"see|what's there|anything there|crash|bump|hit)\b", re.I)
 # the model said it's moving / turning (catches replies that never called a tool)
 RE_CLAIM = re.compile(r"\b(moving|going|driving|turning|spinning|rotating|heading|backing|"
                       r"i'll (move|go|drive|turn|spin|head|back)|on my way|here i come)\b", re.I)
@@ -574,7 +579,9 @@ class Agent:
         if st.mode == "debate":
             note += f"; debate topic: {st.debate_topic or 'not set, ask the user'}"
             note += "; your side: the OPPOSITE of what the user argues"
-        elif self.sensors:
+        elif self.sensors and (RE_ACTION.search(text) or RE_SURROUNDINGS.search(text)):
+            # only when it's about moving or surroundings: on plain chat ("hello") a 4B model
+            # latched onto the distances and answered about obstacles instead of the user
             note += f"; sensors: {self.sensors.summary()}"
         return note
 

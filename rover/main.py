@@ -75,6 +75,7 @@ def main():
             state.info = "loading ears..."
             from .stt import Listener, ListenerConfig
             listener = Listener(ListenerConfig(mic_target=mic_target(),
+                                               threads=config.STT_THREADS,
                                                silent_timeout=config.MIC_SILENT_TIMEOUT_S,
                                                save_dir=os.path.join(LOG_DIR, "utterances")
                                                if config.SAVE_UTTERANCES else None),
@@ -104,22 +105,29 @@ def main():
 
             from .link import PeerLink
             link = PeerLink(on_message=lambda m: parts["agent"].robot_debate.on_message(m), log=log)
-            try:
-                link.start()
-            except OSError as e:
-                log(f"[link] robot-to-robot link disabled: {e}")
-                link = None
             agent = Agent(state, speaker, rover, sensors, link=link,
                           wake_word=config.WAKE_WORD and not args.no_wake_word, log=log)
             parts["agent"] = agent
-            state.info = "warming up the brain (first boot takes ~40 s)..."
+            # Warm up ALL prompt caches before saying "ready" or accepting a robot debate.
+            # (Warming the debate slots in the background after "ready" made the first question
+            # or the first debate turn wait 50-90 s behind them.)
+            state.info = "warming up the brain (first boot takes ~2 min)..."
             agent.warm_up()
+            agent.warm_up(background=True)       # debate slots (runs here, synchronously)
+            try:
+                link.start()                     # only now can the other robot start a debate
+            except OSError as e:
+                log(f"[link] robot-to-robot link disabled: {e}")
+                agent.link = link = None
 
             # live transcript while you talk (not while the robot is thinking: it would steal CPU)
             listener.on_partial = lambda t: setattr(state, "user_text", t + " …")
             listener.partials_enabled = lambda: not agent.busy() and not agent.robot_debate.active
-            # during a robot debate only short phrases ("stop the debate") are worth transcribing
-            listener.max_phrase_s = lambda: 3.0 if agent.robot_debate.active else None
+            # While thinking or in a robot debate, only short phrases ("stop", "stop the debate")
+            # are worth transcribing: everything longer is ignored anyway, and transcribing it
+            # steals CPU from the LLM (background chatter halved its speed).
+            listener.max_phrase_s = lambda: (config.BUSY_MAX_PHRASE_S
+                                             if agent.robot_debate.active or agent.busy() else None)
 
             # strict turn-taking: the mic is muted while the robot talks (+ a short echo tail)
             unmute_timer = [None]
@@ -158,7 +166,6 @@ def main():
                 f"wake word: {'yes' if agent.wake_word else 'no'}, "
                 f"other robot: {config.PEER_NAME + ' @ ' + config.PEER_HOST if link and link.configured() else 'not set'})")
             speaker.say(f"Hi, I'm {config.ROBOT_NAME}. I'm awake and listening.")
-            agent.warm_up(background=True)       # debate prompts: ready by the time anyone debates
         except Exception as e:
             log(f"[boot] FAILED: {type(e).__name__}: {e}")
             state.info = f"startup failed: {e}"
