@@ -632,7 +632,8 @@ class Agent:
                             self.speaker.say(s)
                         spoken.append(s + " ")
                         first = False
-                    if st.mode == "debate" and spoken and RE_END_OF_SENTENCE.search(spoken[-1]):
+                    # spoken[] entries carry a trailing space, so strip before checking the end
+                    if st.mode == "debate" and spoken and RE_END_OF_SENTENCE.search(spoken[-1].rstrip()):
                         self.llm.cancel()         # debate replies are one sentence only
                         one_sentence = True
                         break
