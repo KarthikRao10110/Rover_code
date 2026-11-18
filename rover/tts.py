@@ -1,8 +1,12 @@
 """Streaming text-to-speech: Piper -> PipeWire (pw-play).
 
 say() queues sentences. A synth thread renders them while a player thread plays the
-previous one, so there are no gaps between sentences. The player publishes a loudness
-envelope so the face can move its mouth in sync.
+previous one. All sentences of one reply go into ONE pw-play stream (with a short natural
+pause between them), so there are no clicks or start-up gaps between sentences. The
+player publishes a loudness envelope so the face can move its mouth in sync.
+
+synth() + play() let a caller render a reply ahead of time (e.g. while the other robot is
+still talking in a debate) and start it later with no synthesis delay.
 """
 
 import queue
@@ -19,6 +23,8 @@ from . import config
 
 ENV_FPS = 30
 BT_LATENCY_S = 0.15  # Bluetooth delay; shifts the mouth so it lines up with the sound
+LEAD_S = 0.25        # hand the next sentence to the stream this long before the current one ends
+FILL_S = 0.05        # keep at most this much silence buffered ahead while waiting for text
 
 # espeak IPA phoneme -> viseme (mouth shape). Stress/length marks take the next phoneme's shape.
 VISEMES = {}
@@ -82,9 +88,12 @@ class Speaker:
         self._text_q = queue.Queue()
         self._audio_q = queue.Queue(maxsize=3)
         self._gen = 0                     # bumps on cancel(); stale work is dropped
-        self._proc = None
+        self._proc = None                 # the open pw-play stream (one per reply)
+        self._play_end = 0.0              # monotonic time when everything written so far has played
+        self._stream_gen = -1             # the _gen the open stream belongs to
         self._pending = 0                 # sentences queued but not finished playing
         self._lock = threading.Lock()
+        self._synth_lock = threading.Lock()
         self.envelope = None              # (start_time, np.array of 0..1 levels at ENV_FPS)
         self._said = []                   # sentences fully spoken this turn (for subtitles)
         self._now = None                  # (start_time, duration_s, text) of the sentence playing
@@ -105,6 +114,27 @@ class Speaker:
         if first:
             self.on_state(True)
         self._text_q.put((self._gen, text))
+
+    def synth(self, text):
+        """Render a sentence now (in the caller's thread) without playing it.
+        Returns a clip for play(), or None if there's nothing to say."""
+        text = clean_for_speech(text)
+        if not text:
+            return None
+        pcm, timeline = self._render(text)
+        return (pcm, text, timeline) if pcm else None
+
+    def play(self, clip):
+        """Queue a clip from synth(): starts with no synthesis delay."""
+        if not clip:
+            return
+        with self._lock:
+            self._pending += 1
+            first = self._pending == 1
+        if first:
+            self.on_state(True)
+        pcm, text, timeline = clip
+        self._audio_q.put((self._gen, pcm, text, timeline))
 
     def new_turn(self):
         """Clear the subtitles (call when a new reply starts)."""
@@ -159,6 +189,7 @@ class Speaker:
         p = self._proc
         if p and p.poll() is None:
             p.kill()
+        self._play_end = 0.0
         with self._lock:
             self._pending = 0
         if self._now:  # remember the cut-off sentence for the echo filter
@@ -192,22 +223,28 @@ class Speaker:
         return float(levels[i]) if 0 <= i < len(levels) else 0.0
 
     # ---- threads -----------------------------------------------------------------
+    def _render(self, text):
+        """text -> (int16 PCM bytes, viseme timeline). Never raises."""
+        try:
+            with self._synth_lock:   # espeak-ng (phonemizer) isn't thread-safe
+                chunks = list(self.voice.synthesize(text, self.syn, include_alignments=True))
+            pcm = b"".join(c.audio_int16_bytes for c in chunks)
+            timeline, offset = [], 0
+            for c in chunks:
+                if c.phoneme_alignments:
+                    timeline += [(offset + e, v) for e, v in viseme_timeline(c.phoneme_alignments)]
+                offset += len(c.audio_int16_bytes) // 2
+            return pcm, timeline
+        except Exception as e:  # never let one bad sentence kill the voice
+            print(f"[tts] synth failed: {e}")
+            return b"", []
+
     def _synth_loop(self):
         while True:
             gen, text = self._text_q.get()
             if gen != self._gen:
                 continue
-            try:
-                chunks = list(self.voice.synthesize(text, self.syn, include_alignments=True))
-                pcm = b"".join(c.audio_int16_bytes for c in chunks)
-                timeline, offset = [], 0
-                for c in chunks:
-                    if c.phoneme_alignments:
-                        timeline += [(offset + e, v) for e, v in viseme_timeline(c.phoneme_alignments)]
-                    offset += len(c.audio_int16_bytes) // 2
-            except Exception as e:  # never let one bad sentence kill the voice
-                print(f"[tts] synth failed: {e}")
-                pcm, timeline = b"", []
+            pcm, timeline = self._render(text)
             if gen == self._gen:
                 self._audio_q.put((gen, pcm, text, timeline))
 
@@ -220,24 +257,93 @@ class Speaker:
         rms = np.sqrt(np.mean(a[: n * hop].reshape(n, hop) ** 2, axis=1))
         return np.clip(rms / (rms.max() + 1e-6), 0, 1)
 
+    @staticmethod
+    def _pause_after(text):
+        """Breathing gap after a piece: longer after a full sentence than after a clause."""
+        t = text.rstrip(" \"')]")
+        if t.endswith(("?", "!")):
+            return config.TTS_PAUSE_S * 1.2
+        if t.endswith("."):
+            return config.TTS_PAUSE_S
+        return config.TTS_PAUSE_CLAUSE_S
+
+    def _stream(self, gen):
+        """The open pw-play stream for this reply (opened on first use)."""
+        p = self._proc
+        if p is None or self._stream_gen != gen or p.poll() is not None:
+            self._close_stream(kill=True)
+            p = self._proc = subprocess.Popen(
+                ["pw-play", "--raw", "--rate", str(self.rate), "--channels", "1",
+                 "--format", "s16", "-"],
+                stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            self._stream_gen = gen
+            self._play_end = time.monotonic()
+        return p
+
+    def _write(self, data):
+        p = self._proc
+        try:
+            p.stdin.write(data)
+            p.stdin.flush()
+        except (BrokenPipeError, OSError, ValueError, AttributeError):
+            pass
+
+    def _close_stream(self, kill=False):
+        """End the stream; without kill, waits for the buffered audio to finish playing."""
+        p, self._proc = self._proc, None
+        if not p:
+            return
+        if kill and p.poll() is None:
+            p.kill()
+        try:
+            p.stdin.close()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+        try:
+            p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+    def _sleep_until(self, t, gen):
+        while gen == self._gen:
+            d = t - time.monotonic()
+            if d <= 0:
+                return
+            time.sleep(min(d, 0.02))
+
     def _play_loop(self):
+        silence = bytes(2 * int(FILL_S * self.rate))
         while True:
-            gen, pcm, text, timeline = self._audio_q.get()
-            if gen == self._gen and pcm:
-                t0 = time.monotonic()
-                self.envelope = (t0, self._envelope(pcm))
-                self._now = (t0, len(pcm) / 2 / self.rate, text)
-                self._visemes = (t0, timeline) if timeline else None
-                self._proc = subprocess.Popen(
-                    ["pw-play", "--raw", "--rate", str(self.rate), "--channels", "1",
-                     "--format", "s16", "-"],
-                    stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
-                try:
-                    self._proc.stdin.write(pcm)
-                    self._proc.stdin.close()
-                except (BrokenPipeError, OSError):
-                    pass
-                self._proc.wait()
+            try:
+                gen, pcm, text, timeline = self._audio_q.get(timeout=0.02)
+            except queue.Empty:
+                # mid-reply but the next sentence isn't rendered yet: keep the stream fed with
+                # a little silence so it never runs dry (no underrun clicks)
+                if (self._proc and self._stream_gen == self._gen and self._pending > 0
+                        and self._play_end - time.monotonic() < FILL_S):
+                    self._write(silence)
+                    self._play_end = max(self._play_end, time.monotonic()) + FILL_S
+                continue
+            if gen != self._gen:
+                continue
+            if pcm:
+                self._stream(gen)
+                start = max(time.monotonic(), self._play_end)
+                dur = len(pcm) / 2 / self.rate
+                pause = self._pause_after(text)
+                self.envelope = (start, self._envelope(pcm))
+                self._now = (start, dur, text)
+                self._visemes = (start, timeline) if timeline else None
+                self._write(pcm + bytes(2 * int(pause * self.rate)))
+                self._play_end = start + dur + pause
+                # hand over to the next sentence just before this one ends, so it joins seamlessly
+                self._sleep_until(start + dur - LEAD_S, gen)
+                with self._lock:
+                    last = self._pending <= 1
+                if last:  # nothing else queued: let it finish, then close the stream
+                    self._sleep_until(start + dur, gen)
+                    if gen == self._gen:
+                        self._close_stream()
             if gen != self._gen:
                 continue
             if pcm:
@@ -250,5 +356,7 @@ class Speaker:
                 self._pending = max(0, self._pending - 1)
                 done = self._pending == 0
             if done:
+                if self._proc:          # (e.g. an empty last clip) don't leave a stream open
+                    self._close_stream()
                 self.envelope = None
                 self.on_state(False)

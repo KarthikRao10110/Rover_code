@@ -16,6 +16,8 @@ import time
 
 import pygame
 
+from . import config
+
 BG = (8, 11, 16)
 NORMAL = (79, 209, 255)
 DEBATE = (255, 159, 67)
@@ -41,7 +43,7 @@ class Face:
         pygame.mouse.set_visible(not fullscreen)
         flags = pygame.FULLSCREEN if fullscreen else pygame.RESIZABLE
         self.screen = pygame.display.set_mode((0, 0) if fullscreen else size, flags)
-        pygame.display.set_caption("Rover")
+        pygame.display.set_caption(config.ROBOT_NAME)
         self.clock = pygame.time.Clock()
         self.fullscreen = fullscreen
         self._fonts = {}

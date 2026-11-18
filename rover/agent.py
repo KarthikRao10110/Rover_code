@@ -193,7 +193,7 @@ RE_DEBATE_OFF = re.compile(
 # while two robots debate, only a clear "stop the debate" ends it (the other robot might say "you win")
 RE_ROBOT_DEBATE_OFF = re.compile(r"\b(end|stop|finish|cancel) (the |this |your )?debate\b", re.I)
 RE_NAME = re.compile(r"\b(?i:i am|i'm|my name is|my name's|call me|this is)\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)")
-NOT_NAMES = {"Rover", "Robot", "Fine", "Good", "Okay", "Ok", "Here", "Back", "Not", "Sorry", "Sure", "Just",
+NOT_NAMES = {config.ROBOT_NAME, config.PEER_NAME or "Robot", "Rover", "Robot", "Fine", "Good", "Okay", "Ok", "Here", "Back", "Not", "Sorry", "Sure", "Just",
              "Going", "Trying", "Doing", "Thinking", "Done", "Ready", "Tired", "Happy", "Sad", "Hungry"}
 RE_FILLER = re.compile(r"^\W*(uh+|um+|hmm+|mm+|ah+|oh|okay|ok|yeah|yes|no|huh|the|a|and)\W*$", re.I)
 RE_WAKE = re.compile(r"\b(" + "|".join(map(re.escape, config.WAKE_WORDS)) + r")\b", re.I)
@@ -269,15 +269,19 @@ def looks_finished(text):
     return last not in DANGLING
 
 
-SENTENCE_END = re.compile(r"(.+?[.!?;:])(\s+)", re.S)
+SENTENCE_END = re.compile(r"(.+?[.!?][\"')\]]*)(\s+)", re.S)   # whole sentences (not ; or :)
 RE_END_OF_SENTENCE = re.compile(r"[.!?][\"')\]]*$")   # a piece that finishes a whole sentence
 RE_TOOL_LEAK = re.compile(r"\b(set_mode|read_sensors|start_robot_debate|tool call|function call)\b|"
                           r"^\W*(move|turn|stop)\s*\(", re.I)
 
 
-def split_sentences(buf, first):
+def split_sentences(buf, first, clauses=True):
     """Pull complete sentences off the front of buf. For the first chunk of a reply we also
-    cut at a comma once there are 8+ words, so the voice starts sooner."""
+    cut at a comma once there are 8+ words, so the voice starts sooner.
+
+    clauses=False never cuts mid-sentence. Every piece is spoken on its own with a
+    sentence-final fall in pitch, so mid-sentence cuts sound robotic; the comma cut is only
+    worth it where starting to talk sooner matters (normal chat)."""
     out = []
     while True:
         m = SENTENCE_END.match(buf)
@@ -286,7 +290,7 @@ def split_sentences(buf, first):
             buf = buf[m.end():]
             first = False
             continue
-        if first and not out:
+        if clauses and first and not out:
             c = buf.find(", ")
             if c > 0 and len(buf[:c].split()) >= 8:
                 out.append(buf[: c + 1].strip())
@@ -768,7 +772,7 @@ class Agent:
                     return
                 if kind == "text":
                     buf += val
-                    sentences, buf = split_sentences(buf, first)
+                    sentences, buf = split_sentences(buf, first, clauses=st.mode != "debate")
                     for s in sentences:
                         if RE_TOOL_LEAK.search(s) or (spoken and RE_FILLER_SENT.search(s)):
                             continue

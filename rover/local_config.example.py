@@ -7,9 +7,12 @@ Below: the SECOND rover (different motor wiring, only a front and a rear ultraso
 ROBOT_NAME = "Nova"                  # its name is also its wake word ("Nova, what's...")
 LINK_KEY = "pick-any-secret"         # same on both robots
 
+# its own voice, so the audience can tell the two robots apart (Lyra keeps the default lessac voice)
+TTS_VOICE = "models/piper/en_US-hfc_female-medium.onnx"
+
 # the other robot
-PEER_NAME = "Rover"
-PEER_HOST = "maximus.local"          # Rover's hostname (run `hostname` on it) or its IP address
+PEER_NAME = "Lyra"
+PEER_HOST = "maximus.local"          # Lyra's hostname (run `hostname` on it) or its IP address
 
 # --- motors (L298N, BCM pin numbers) -- set to this robot's wiring
 LEFT_IN1, LEFT_IN2, LEFT_EN = 17, 27, 12

@@ -19,7 +19,7 @@ UNIT_M = {"m": 1, "meter": 1, "meters": 1, "metre": 1, "metres": 1, "cm": 0.01, 
           "ft": 0.3048, "step": 0.25, "steps": 0.25, "inch": 0.0254, "inches": 0.0254}
 UNIT_S = {"s", "sec", "secs", "second", "seconds"}
 
-FILLER = re.compile(r"\b(please|can you|could you|would you|will you|rover|robot|hey|now|just|"
+FILLER = re.compile(r"\b(please|can you|could you|would you|will you|rover|lyra|nova|robot|hey|now|just|"
                     r"slowly|quickly|a bit|a little|for me|okay|ok|so|i'll|i will|let's|lets|you|we|"
                     r"i want you to|i need you to|go ahead and|try to)\b|[,.!?]", re.I)
 

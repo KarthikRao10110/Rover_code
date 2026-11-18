@@ -88,11 +88,13 @@ HISTORY_TURNS = 8                  # user+assistant pairs kept in context
 TTS_VOICE = "models/piper/en_US-lessac-medium.onnx"
 TTS_SPEED = 0.92                   # >1 slower, <1 faster (Piper length_scale)
 TTS_EXPRESSION = 0.8               # pitch/intonation variation (Piper noise_scale; voice default 0.667)
+TTS_PAUSE_S = 0.3                  # breathing gap between sentences (x1.2 after ? and !)
+TTS_PAUSE_CLAUSE_S = 0.12          # gap after a piece cut at a comma (normal chat only)
 TTS_RHYTHM = 1.0                   # timing variation between sounds (Piper noise_w; voice default 0.8)
 CONTINUATION_WAIT_S = 1.5          # unfinished-sounding phrase: wait this long for the rest
 POST_SPEECH_MUTE_S = 0.6           # keep the mic muted briefly after talking (Bluetooth delay + echo tail)
 
-ROBOT_NAME = "Rover"
+ROBOT_NAME = "Lyra"                # each robot sets its own in rover/local_config.py
 # Wake word: in normal conversation the robot only answers when its name is in the sentence,
 # then keeps listening without the name for WAKE_WINDOW_S after each reply. (Debate mode with a
 # person needs no wake word.) Start with --no-wake-word to answer everything.
@@ -147,4 +149,7 @@ if STOP_CM_TURN is None:
     STOP_CM_TURN = {"left": {n: OBSTACLE_STOP_CM for n in ULTRASONIC if -90 < _angle(n) < 0},
                     "right": {n: OBSTACLE_STOP_CM for n in ULTRASONIC if 0 < _angle(n) < 90}}
 if WAKE_WORDS is None:
-    WAKE_WORDS = [ROBOT_NAME.lower()] + (["rovers", "rova", "rober"] if ROBOT_NAME.lower() == "rover" else [])
+    # speech-recognition slips of each name (not real words/names, so they can't trigger by accident)
+    _MISHEARD_NAMES = {"lyra": ["lira", "laira", "leira", "lyre"], "nova": ["novah"],
+                       "rover": ["rovers", "rova", "rober"]}
+    WAKE_WORDS = [ROBOT_NAME.lower()] + _MISHEARD_NAMES.get(ROBOT_NAME.lower(), [])

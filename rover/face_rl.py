@@ -16,6 +16,8 @@ import time
 
 import pyray as rl
 
+from . import config
+
 FONT_BOLD = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 FONT_REG = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 
@@ -82,7 +84,7 @@ class FaceRL:
             flags |= rl.ConfigFlags.FLAG_WINDOW_RESIZABLE
         rl.set_config_flags(flags)
         rl.set_trace_log_level(rl.TraceLogLevel.LOG_WARNING)
-        rl.init_window(0 if fullscreen else size[0], 0 if fullscreen else size[1], "Rover")
+        rl.init_window(0 if fullscreen else size[0], 0 if fullscreen else size[1], config.ROBOT_NAME)
         if fullscreen:
             rl.toggle_borderless_windowed()
             rl.hide_cursor()

@@ -225,7 +225,7 @@ class RobotDebate:
                     return
                 if kind == "text":
                     buf += val
-                    sentences, buf = split_sentences(buf, first)
+                    sentences, buf = split_sentences(buf, first, clauses=False)
                     done = False
                     for s in sentences:
                         if not RE_TOOL_LEAK.search(s):
@@ -265,8 +265,19 @@ class RobotDebate:
             sp.say(f"I lost contact with {self.peer}, so let's stop the debate here.")
             self.stop(reason="lost contact")
             return
+        # render my audio now, while the other robot is still talking, so I start the moment it stops
+        clips = []
+        if pending and self._spoken < t - 1:
+            clips = [sp.synth(s) for s in pending]
         if not self._may_speak(t, gen, timeout=TURN_TIMEOUT_S) or gen != self._gen:
             return
+        if clips:
+            if not said:
+                sp.new_turn()
+            for c in clips:
+                sp.play(c)
+            said.extend(pending)
+            pending.clear()
         flush()
         time.sleep(0.3)
         while sp.speaking() and gen == self._gen:
