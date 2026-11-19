@@ -87,7 +87,7 @@ BRAINS = {
     "lfm":  {"label": "LFM3 Omni 2B", "model": "models/llm/LFM3-Omni-2B-Q4_0.gguf",
              "port": 8082, "ctx": 12288, "slots": 3},
 }
-BRAIN = "qwen"                     # used when logs/brain.txt doesn't exist yet
+BRAIN = "lfm"                      # default brain (used when logs/brain.txt doesn't exist yet)
 LLM = BRAINS[BRAIN]                # (kept for older code; the running brain is in rover/llm.py)
 SLOT_CHAT, SLOT_DEBATE, SLOT_ROBOT_DEBATE = 0, 1, 2
 LLM_THREADS_GEN = 3                # 3 beats 4 for generation on Pi 5 (memory bound)

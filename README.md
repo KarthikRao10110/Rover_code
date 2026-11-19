@@ -72,8 +72,8 @@ press **B**, or say "Lyra, switch your brain". The choice is remembered (`logs/b
 
 | brain | file | notes |
 |---|---|---|
-| Qwen3 4B (default) | `models/llm/Qwen3-4B-Instruct-2507-Q4_0.gguf` | best debates, ~10 s to first word |
-| LFM3 Omni 2B | `models/llm/LFM3-Omni-2B-Q4_0.gguf` | much faster (~1 s to first word), weaker debater |
+| Qwen3 4B | `models/llm/Qwen3-4B-Instruct-2507-Q4_0.gguf` | best debates, ~10 s to first word |
+| LFM3 Omni 2B (default) | `models/llm/LFM3-Omni-2B-Q4_0.gguf` | much faster (~1 s to first word), weaker debater |
 
 Get LFM3 Omni 2B (1 GB; needs llama.cpp v0.8.0 or newer):
 ```bash
