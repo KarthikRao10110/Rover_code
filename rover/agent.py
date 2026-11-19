@@ -41,6 +41,7 @@ class State:
         self.mic_level = 0.0
         self.mouth = 0.0
         self.user_name = ""           # remembered when the user introduces themselves
+        self.brain = ""               # label of the running model (BRAIN button on the face)
         self.viseme = "rest"          # current mouth shape for lip sync
         self.emotion = ""             # optional expression override (happy, sad, surprised...)
         self.alive = True
@@ -201,12 +202,14 @@ RE_WAKE = re.compile(r"\b(" + "|".join(map(re.escape, config.WAKE_WORDS)) + r")\
 
 def _peer_re():
     names = ["the other robot", "other robot", "each other", "robot debate", "your friend", "the robots"]
-    if config.PEER_NAME:
-        names.insert(0, config.PEER_NAME.lower())
+    names = config.PEER_NAMES + names            # "Nova" and how speech recognition mishears it
     return re.compile(r"\b(" + "|".join(map(re.escape, names)) + r")\b", re.I)
 
 
 RE_PEER = _peer_re()
+# "switch your brain", "change model", "use your other brain"
+RE_SWITCH_BRAIN = re.compile(r"\b(switch|change|swap|toggle)\b.{0,20}\b(brains?|models?)\b|"
+                             r"\buse (your|the) (other|second|different|new) (brain|model)\b", re.I)
 RE_TOPIC = re.compile(r"\b(?:about|on|over|regarding|whether|that|topic(?: is)?:?)\s+(.+)$", re.I)
 RE_SIDE_AGAINST = re.compile(r"\byou (?:argue|take|are|be|go) (?:the )?(?:against|no|con|negative|opposing)\b", re.I)
 # "start pair debate", "robot debate", "debate each other" -> robot vs robot
@@ -226,7 +229,7 @@ TOPIC_JUNK = {"start", "begin", "a", "an", "the", "debate", "debating", "debates
               "okay", "ok", "do", "have", "go", "and", "me", "you", "we", "i", "to", "for", "about", "on",
               "each", "other", "yes", "no", "um", "uh", "hey", "hi", "hello", "can", "could", "want",
               "wanna", "should", "shall", "new", "topic", "it", "this", "that", "some", "something"}
-TOPIC_JUNK |= {w.lower() for w in config.WAKE_WORDS + [config.ROBOT_NAME, config.PEER_NAME or ""] if w}
+TOPIC_JUNK |= {w.lower() for n in config.WAKE_WORDS + config.PEER_NAMES + [config.ROBOT_NAME] for w in n.split() if w}
 
 
 def clean_topic(text):
@@ -348,13 +351,62 @@ class Agent:
         self._awake_until = 0.0
         self._setup = None                   # debate being set up: asking for / confirming the topic
         self.on_shutdown = None              # set by main.py: closes the whole app
+        self.brain = None                    # set by main.py: llm.Brain (which model is running)
+        self.switching = False               # swapping brains: the LLM is down for a moment
         from .robot_debate import RobotDebate
         self.robot_debate = RobotDebate(self)
         self._update_hint()
 
     # ---- helpers -------------------------------------------------------------------
     def busy(self):
-        return self._busy.is_set() or self.robot_debate.thinking
+        return self._busy.is_set() or self.robot_debate.thinking or self.switching
+
+    # ---- switching brains (the BRAIN button, the B key, or "switch your brain") ------
+    def switch_brain(self, name=None):
+        b = self.brain
+        if b is None or self.switching:
+            return
+        name = name or b.next_name()
+        if not name or name == b.name:
+            self.speaker.say("I only have one brain installed right now.")
+            return
+        if self.robot_debate.active:
+            self.speaker.say("I can't switch my brain in the middle of a debate.")
+            return
+        self.switching = True               # set before the thread starts: blocks a double tap
+        threading.Thread(target=self._switch_brain, args=(name,), name="brain-switch", daemon=True).start()
+
+    def _switch_brain(self, name):
+        st, b = self.state, self.brain
+        old = b.name
+        try:
+            self.interrupt("switching brain")
+            self.history = []                # the new model starts a fresh conversation
+            label = config.BRAINS[name].get("label", name)
+            self.log(f"[brain] {b.label} -> {label}")
+            st.info = f"switching brain to {label}..."
+            self.speaker.new_turn()
+            self.speaker.say("Okay, switching my brain. Give me a moment.")   # (never say model names)
+            t = time.monotonic()
+            try:
+                b.switch(name)
+            except Exception as e:
+                self.log(f"[brain] {label} failed to start: {e}; going back")
+                st.info = "that brain didn't start, going back..."
+                b.switch(old)
+            st.brain = b.label
+            st.info = "warming up the new brain..."
+            self.warm_up()
+            self.warm_up(background=True)
+            self.log(f"[brain] now {b.label} (ready in {time.monotonic() - t:.0f}s)")
+            st.info = ""
+            self.speaker.say("I'm back. My new brain is ready." if b.name == name
+                             else "Sorry, that brain didn't work, so I'm back on my old one.")
+        except Exception as e:
+            self.log(f"[brain] switch failed: {type(e).__name__}: {e}")
+            st.info = f"brain switch failed: {e}"
+        finally:
+            self.switching = False
 
     def awake(self):
         """Wake word not needed: right after a reply, in debate mode, or when disabled."""
@@ -502,6 +554,10 @@ class Agent:
             else:
                 self._continue_setup(text)
                 return
+
+        if st.mode == "normal" and RE_SWITCH_BRAIN.search(text):
+            self.switch_brain()
+            return
 
         # robot vs robot debate ("Rover, debate Nova about homework", "start pair debate")
         if st.mode == "normal" and (RE_PAIR.search(text) or (RE_DEBATE_ON.search(text) and RE_PEER.search(text))):

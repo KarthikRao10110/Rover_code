@@ -53,6 +53,88 @@ def wait_ready(port, timeout=180, proc=None):
     raise TimeoutError(f"llama-server on port {port} not ready after {timeout}s")
 
 
+CHOICE_FILE = os.path.join(ROOT, "logs", "brain.txt")
+
+
+class Brain:
+    """Which model is running. Only one llama-server at a time (two would fight over CPU and RAM);
+    switching stops the current one and starts the other on the same port."""
+
+    def __init__(self, log_path, log=print):
+        self.log_path = log_path
+        self.log = log
+        self.proc = None
+        self.name = self._saved()
+
+    @staticmethod
+    def _saved():
+        try:
+            with open(CHOICE_FILE) as f:
+                name = f.read().strip()
+        except OSError:
+            name = ""
+        return name if name in config.BRAINS and _installed(name) else config.BRAIN
+
+    @property
+    def cfg(self):
+        return config.BRAINS[self.name]
+
+    @property
+    def label(self):
+        return self.cfg.get("label", self.name)
+
+    def options(self):
+        """Installed brains, in config order."""
+        return [n for n in config.BRAINS if _installed(n)]
+
+    def next_name(self):
+        opts = self.options()
+        return opts[(opts.index(self.name) + 1) % len(opts)] if self.name in opts and len(opts) > 1 else None
+
+    def start(self):
+        if is_ready(self.cfg["port"]):          # left over from a crashed run: we can't tell which model
+            self._kill_port(self.cfg["port"])
+        log = open(self.log_path, "ab")
+        log.write(f"\n===== starting brain: {self.label} =====\n".encode())
+        log.flush()
+        self.proc = subprocess.Popen(server_cmd(self.cfg), stdout=log, stderr=subprocess.STDOUT)
+        wait_ready(self.cfg["port"], timeout=300, proc=self.proc)
+
+    def stop(self):
+        p, self.proc = self.proc, None
+        if p and p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(10)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait(5)
+
+    def switch(self, name):
+        if name not in config.BRAINS or not _installed(name):
+            raise ValueError(f"brain '{name}' isn't installed")
+        self.stop()
+        self.name = name
+        try:
+            os.makedirs(os.path.dirname(CHOICE_FILE), exist_ok=True)
+            with open(CHOICE_FILE, "w") as f:
+                f.write(name + "\n")
+        except OSError:
+            pass
+        self.start()
+
+    @staticmethod
+    def _kill_port(port):
+        subprocess.run(["fuser", "-k", f"{port}/tcp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        end = time.monotonic() + 10
+        while is_ready(port) and time.monotonic() < end:
+            time.sleep(0.3)
+
+
+def _installed(name):
+    return os.path.exists(os.path.join(ROOT, config.BRAINS[name]["model"]))
+
+
 class ChatClient:
     def __init__(self, cfg):
         self.url = f"http://127.0.0.1:{cfg['port']}/v1/chat/completions"

@@ -77,9 +77,18 @@ AUTO_MAX_DISTANCE_M = 3.0
 
 # --- Voice agent ------------------------------------------------------------------
 LLAMA_SERVER = "/home/maximus/src/llama.cpp/build/bin/llama-server"
-# One model does everything (chat, tool calls / driving, debates). Slots each keep their own
-# cached prompt: 0 = chat + tools, 1 = debating a person, 2 = debating the other robot.
-LLM = {"model": "models/llm/Qwen3-4B-Instruct-2507-Q4_0.gguf", "port": 8082, "ctx": 12288, "slots": 3}
+# One model at a time does everything (chat, tool calls / driving, debates). Slots each keep their
+# own cached prompt: 0 = chat + tools, 1 = debating a person, 2 = debating the other robot.
+# Several "brains" can be installed; the BRAIN button on the face (or the B key, or "switch your
+# brain") swaps between them. The choice is remembered in logs/brain.txt.
+BRAINS = {
+    "qwen": {"label": "Qwen3 4B", "model": "models/llm/Qwen3-4B-Instruct-2507-Q4_0.gguf",
+             "port": 8082, "ctx": 12288, "slots": 3},
+    "lfm":  {"label": "LFM3 Omni 2B", "model": "models/llm/LFM3-Omni-2B-Q4_0.gguf",
+             "port": 8082, "ctx": 12288, "slots": 3},
+}
+BRAIN = "qwen"                     # used when logs/brain.txt doesn't exist yet
+LLM = BRAINS[BRAIN]                # (kept for older code; the running brain is in rover/llm.py)
 SLOT_CHAT, SLOT_DEBATE, SLOT_ROBOT_DEBATE = 0, 1, 2
 LLM_THREADS_GEN = 3                # 3 beats 4 for generation on Pi 5 (memory bound)
 LLM_THREADS_BATCH = 4
@@ -148,8 +157,14 @@ if STOP_CM_BACKWARD is None:
 if STOP_CM_TURN is None:
     STOP_CM_TURN = {"left": {n: OBSTACLE_STOP_CM for n in ULTRASONIC if -90 < _angle(n) < 0},
                     "right": {n: OBSTACLE_STOP_CM for n in ULTRASONIC if 0 < _angle(n) < 90}}
+# speech-recognition slips of each name (not real words/names, so they can't trigger by accident)
+MISHEARD_NAMES = {"lyra": ["lira", "laira", "leira", "lyre", "lyrah"],
+                  "nova": ["novah", "noha", "nohva", "nowa", "nowva", "nava", "novva", "nouva", "knova"],
+                  "rover": ["rovers", "rova", "rober"]}
+# when the OTHER robot is named in "debate <name>" a looser match is fine (the word "debate" is
+# needed too), so a few real words that sound like it count as well
+_PEER_EXTRA = {"nova": ["noah", "nover", "novo", "no va", "nor va", "nova's"], "lyra": ["laura", "lara", "lyrics"]}
 if WAKE_WORDS is None:
-    # speech-recognition slips of each name (not real words/names, so they can't trigger by accident)
-    _MISHEARD_NAMES = {"lyra": ["lira", "laira", "leira", "lyre"], "nova": ["novah"],
-                       "rover": ["rovers", "rova", "rober"]}
-    WAKE_WORDS = [ROBOT_NAME.lower()] + _MISHEARD_NAMES.get(ROBOT_NAME.lower(), [])
+    WAKE_WORDS = [ROBOT_NAME.lower()] + MISHEARD_NAMES.get(ROBOT_NAME.lower(), [])
+PEER_NAMES = ([PEER_NAME.lower()] + MISHEARD_NAMES.get(PEER_NAME.lower(), []) + _PEER_EXTRA.get(PEER_NAME.lower(), [])
+              if PEER_NAME else [])

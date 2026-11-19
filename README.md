@@ -14,6 +14,7 @@ Not in git (too big), put them in `models/`:
 | file | source |
 |---|---|
 | `models/llm/Qwen3-4B-Instruct-2507-Q4_0.gguf` | Qwen3-4B-Instruct-2507 GGUF, Q4_0 (Hugging Face) |
+| `models/llm/LFM3-Omni-2B-Q4_0.gguf` (optional 2nd brain) | Hugging Face `LiquidAI/LFM3-Omni-2B-GGUF`, Q4_0 |
 | `models/parakeet-tdt-0.6b-v2/` (encoder/decoder/joiner `.int8.onnx`, `tokens.txt`) | sherpa-onnx release `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` |
 | `models/silero_vad.onnx` | sherpa-onnx release `asr-models/silero_vad.onnx` |
 | `models/piper/en_US-lessac-medium.onnx` (+ `.onnx.json`) | Hugging Face `rhasspy/piper-voices` (Lyra's voice, the default) |
@@ -65,7 +66,21 @@ mic → Silero VAD → Parakeet STT → wake word → router ─┬ "stop" ─�
                                                       └ robot debate ───→ robot_debate.py + link.py   (slot 2)
 LLM text streams → sentence splitter → Piper TTS → speaker (starts talking while still writing)
 ```
-One model does everything: Qwen3-4B-Instruct-2507 (llama-server, port 8082, 3 cached slots).
+One model does everything (llama-server, port 8082, 3 cached slots). Two "brains" are installed and
+you can swap between them while it runs: tap the **BRAIN** button in the top-right corner of the face,
+press **B**, or say "Lyra, switch your brain". The choice is remembered (`logs/brain.txt`).
+
+| brain | file | notes |
+|---|---|---|
+| Qwen3 4B (default) | `models/llm/Qwen3-4B-Instruct-2507-Q4_0.gguf` | best debates, ~10 s to first word |
+| LFM3 Omni 2B | `models/llm/LFM3-Omni-2B-Q4_0.gguf` | much faster (~1 s to first word), weaker debater |
+
+Get LFM3 Omni 2B (1 GB; needs llama.cpp v0.8.0 or newer):
+```bash
+curl -fL -o models/llm/LFM3-Omni-2B-Q4_0.gguf \
+  https://huggingface.co/LiquidAI/LFM3-Omni-2B-GGUF/resolve/main/LFM3-Omni-2B-Q4_0.gguf
+```
+Brains are listed in `BRAINS` in `rover/config.py`; one that isn't downloaded is simply skipped.
 
 ### LLM tools
 | tool | what the model gets back |
@@ -86,6 +101,9 @@ the 4-sensor rover and a front+rear 2-sensor rover.
 ## Two rovers debating (Lyra and Nova)
 Both rovers run this same code; each has its own `rover/local_config.py` (name, motor pins,
 sensors, the other robot's address). See `rover/local_config.example.py`.
+They find each other by name (`PEER_HOST`, e.g. `raspberrypi.local`); if that fails, the rover scans
+its Wi-Fi network for the other robot (port 8765 + the shared `LINK_KEY`), so a changed IP doesn't matter.
+Speech-recognition slips of the names ("Noha", "Nohva", "Novah", "Noah"...) are in `MISHEARD_NAMES` in `rover/config.py`.
 They talk over Wi-Fi (TCP port 8765), so each always gets the other's exact words, and they
 still speak out loud for the audience. One talks at a time: while one is speaking, the other is
 already writing its answer, and starts talking as soon as the first one finishes.

@@ -35,7 +35,8 @@ def mix(c1, c2, t):
 
 
 class Face:
-    def __init__(self, state, on_interrupt, on_quit, fullscreen=True, size=(800, 480)):
+    def __init__(self, state, on_interrupt, on_quit, fullscreen=True, size=(800, 480), on_brain=None):
+        self.on_brain = on_brain          # B key: switch the language model
         self.state = state
         self.on_interrupt = on_interrupt
         self.on_quit = on_quit
@@ -75,6 +76,8 @@ class Face:
                         self.on_quit()
                     elif ev.key == pygame.K_SPACE:
                         self.on_interrupt()
+                    elif ev.key == pygame.K_b and self.on_brain:
+                        self.on_brain()
                     elif ev.key == pygame.K_f:
                         self.fullscreen = not self.fullscreen
                         pygame.display.set_mode((0, 0) if self.fullscreen else (800, 480),

@@ -14,7 +14,7 @@ import time
 
 from . import config
 from .agent import Agent, State
-from .llm import ROOT, start_server, wait_ready
+from .llm import ROOT, Brain
 
 LOG_DIR = os.path.join(ROOT, "logs")
 
@@ -38,7 +38,6 @@ def main():
     os.makedirs(LOG_DIR, exist_ok=True)
 
     state = State()
-    procs = []
     parts = {}
 
     def shutdown(*_):
@@ -54,13 +53,19 @@ def main():
         if "agent" in parts:
             parts["agent"].interrupt("screen/space bar")
 
+    def switch_brain():                      # BRAIN button on the face / B key
+        if "agent" in parts and state.status != "starting":
+            parts["agent"].switch_brain()
+
     # ------------------------------------------------------------------ boot ------
     def boot():
         try:
-            state.info = "starting the language model..."
-            llm = start_server(config.LLM, os.path.join(LOG_DIR, "llm.log"))
-            if llm:
-                procs.append(llm)
+            brain = Brain(os.path.join(LOG_DIR, "llm.log"), log=log)
+            parts["brain"] = brain
+            state.brain = brain.label
+            state.info = f"starting the language model ({brain.label})..."
+            llm_ready = threading.Thread(target=brain.start, name="llm-start", daemon=True)
+            llm_ready.start()                    # loads while the voice and ears load
 
             state.info = "loading voice..."
             from .tts import Speaker
@@ -101,13 +106,16 @@ def main():
             parts["rover"] = rover
 
             state.info = "waking up the brain..."
-            wait_ready(config.LLM["port"], proc=llm)
+            llm_ready.join()
+            if not brain.proc or brain.proc.poll() is not None:
+                raise RuntimeError(f"the language model ({brain.label}) didn't start, see logs/llm.log")
 
             from .link import PeerLink
             link = PeerLink(on_message=lambda m: parts["agent"].robot_debate.on_message(m), log=log)
             agent = Agent(state, speaker, rover, sensors, link=link,
                           wake_word=config.WAKE_WORD and not args.no_wake_word, log=log)
             agent.on_shutdown = shutdown         # voice command "shut down" closes the app
+            agent.brain = brain
             parts["agent"] = agent
             # Warm up ALL prompt caches before saying "ready" or accepting a robot debate.
             # (Warming the debate slots in the background after "ready" made the first question
@@ -204,12 +212,14 @@ def main():
             if args.face == "raylib":
                 try:
                     from .face_rl import FaceRL
-                    face = FaceRL(state, on_interrupt=interrupt, on_quit=shutdown, fullscreen=not args.windowed)
+                    face = FaceRL(state, on_interrupt=interrupt, on_quit=shutdown, fullscreen=not args.windowed,
+                                  on_brain=switch_brain)
                 except Exception as e:
                     log(f"[face] raylib face failed ({e}); using the simple face")
             if face is None:
                 from .face import Face
-                face = Face(state, on_interrupt=interrupt, on_quit=shutdown, fullscreen=not args.windowed)
+                face = Face(state, on_interrupt=interrupt, on_quit=shutdown, fullscreen=not args.windowed,
+                            on_brain=switch_brain)
             face.run()
     finally:
         state.alive = False
@@ -222,13 +232,8 @@ def main():
                     pass
         if parts.get("speaker"):
             parts["speaker"].cancel()
-        for p in procs:
-            p.terminate()
-        for p in procs:
-            try:
-                p.wait(5)
-            except Exception:
-                p.kill()
+        if parts.get("brain"):
+            parts["brain"].stop()
         log("bye")
         os._exit(0)  # don't wait on the blocking mic thread
 

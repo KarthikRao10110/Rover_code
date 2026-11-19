@@ -143,6 +143,8 @@ class RobotDebate:
         if kind == "start":
             if self.active:
                 return {"ok": False, "error": "already debating"}
+            if self.agent.switching:
+                return {"ok": False, "error": "switching brains, try again in a minute"}
             self._begin(msg.get("topic", ""), msg.get("side", "against"),
                         int(msg.get("rounds") or config.ROBOT_DEBATE_ROUNDS), host=False)
             return {"ok": True}

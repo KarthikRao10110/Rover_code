@@ -74,9 +74,11 @@ def ascii_text(t):
 
 
 class FaceRL:
-    def __init__(self, state, on_interrupt, on_quit, fullscreen=True, size=(800, 480)):
+    def __init__(self, state, on_interrupt, on_quit, fullscreen=True, size=(800, 480), on_brain=None):
         self.state = state
         self.on_interrupt = on_interrupt
+        self.on_brain = on_brain          # BRAIN button / B key: switch the language model
+        self.brain_rect = None            # where the BRAIN button was drawn (for taps)
         self.on_quit = on_quit
         self.fullscreen = fullscreen
         flags = rl.ConfigFlags.FLAG_MSAA_4X_HINT | rl.ConfigFlags.FLAG_VSYNC_HINT
@@ -124,8 +126,14 @@ class FaceRL:
                 rl.toggle_borderless_windowed()
                 self.fullscreen = not self.fullscreen
                 (rl.hide_cursor if self.fullscreen else rl.show_cursor)()
-            if self.fullscreen and rl.is_mouse_button_pressed(rl.MouseButton.MOUSE_BUTTON_LEFT):
-                self.on_interrupt()  # tap the screen
+            if rl.is_key_pressed(rl.KeyboardKey.KEY_B) and self.on_brain:
+                self.on_brain()
+            if rl.is_mouse_button_pressed(rl.MouseButton.MOUSE_BUTTON_LEFT):
+                r = self.brain_rect
+                if r and self.on_brain and rl.check_collision_point_rec(rl.get_mouse_position(), r):
+                    self.on_brain()      # tap the BRAIN button (works in a window too)
+                elif self.fullscreen:
+                    self.on_interrupt()  # tap anywhere else on the screen
             dt = min(rl.get_frame_time(), 0.1)
             rl.begin_drawing()
             self.draw(rl.get_screen_width(), rl.get_screen_height(), dt)
@@ -352,6 +360,22 @@ class FaceRL:
             r = rl.Rectangle(W / 2 - m.x / 2 - 2.4 * u, 1.6 * u, m.x + 4.8 * u, m.y + 1.2 * u)
             rl.draw_rectangle_rounded(r, 1.0, 12, col(DEBATE, 230))
             rl.draw_text_ex(self.font_b, label, rl.Vector2(r.x + 2.4 * u, r.y + 0.6 * u), size, 0, col(BG))
+        # BRAIN button, top right: shows the running model, tap to switch
+        brain = getattr(st, "brain", "")
+        if brain and self.on_brain and st.mode != "debate":
+            switching = st.info.startswith(("switching brain", "warming up the new"))
+            label = "BRAIN: " + ascii_text(brain) + ("  ..." if switching else "  >")
+            size = 2.8 * u
+            m = rl.measure_text_ex(self.font_b, label, size, 0)
+            pad = 1.8 * u
+            r = rl.Rectangle(W - m.x - 2 * pad - 1.6 * u, 1.6 * u, m.x + 2 * pad, m.y + 1.6 * u)
+            # a generous touch target (fingers are bigger than the button)
+            self.brain_rect = rl.Rectangle(r.x - 2 * u, 0, W - r.x + 2 * u, r.y + r.height + 2 * u)
+            rl.draw_rectangle_rounded(r, 1.0, 12, col(self.color, 70 if switching else 40))
+            rl.draw_rectangle_rounded_lines_ex(r, 1.0, 12, max(1.0, 0.25 * u), col(self.color, 180))
+            rl.draw_text_ex(self.font_b, label, rl.Vector2(r.x + pad, r.y + 0.8 * u), size, 0, col(WHITE, 220))
+        else:
+            self.brain_rect = None
         tags = []
         if st.moving:
             tags.append("MOVING")
