@@ -41,7 +41,7 @@ class Face:
         self.on_interrupt = on_interrupt
         self.on_quit = on_quit
         pygame.init()
-        pygame.mouse.set_visible(not fullscreen)
+        pygame.mouse.set_visible(True)   # pointer stays visible, also in fullscreen
         flags = pygame.FULLSCREEN if fullscreen else pygame.RESIZABLE
         self.screen = pygame.display.set_mode((0, 0) if fullscreen else size, flags)
         pygame.display.set_caption(config.ROBOT_NAME)
@@ -82,7 +82,6 @@ class Face:
                         self.fullscreen = not self.fullscreen
                         pygame.display.set_mode((0, 0) if self.fullscreen else (800, 480),
                                                 pygame.FULLSCREEN if self.fullscreen else pygame.RESIZABLE)
-                        pygame.mouse.set_visible(not self.fullscreen)
                 elif ev.type == pygame.FINGERDOWN or (ev.type == pygame.MOUSEBUTTONDOWN and self.fullscreen):
                     self.on_interrupt()  # tap the face to stop (in a window a click just focuses it)
             self.draw(time.monotonic())

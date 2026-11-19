@@ -89,7 +89,7 @@ class FaceRL:
         rl.init_window(0 if fullscreen else size[0], 0 if fullscreen else size[1], config.ROBOT_NAME)
         if fullscreen:
             rl.toggle_borderless_windowed()
-            rl.hide_cursor()
+        rl.show_cursor()                  # the mouse pointer stays visible, also in fullscreen
         rl.set_exit_key(rl.KeyboardKey.KEY_NULL)
         rl.set_target_fps(30)   # smooth enough; leaves CPU for the LLM
         self.font_b = rl.load_font_ex(FONT_BOLD, 72, None, 0)
@@ -125,7 +125,6 @@ class FaceRL:
             if rl.is_key_pressed(rl.KeyboardKey.KEY_F):
                 rl.toggle_borderless_windowed()
                 self.fullscreen = not self.fullscreen
-                (rl.hide_cursor if self.fullscreen else rl.show_cursor)()
             if rl.is_key_pressed(rl.KeyboardKey.KEY_B) and self.on_brain:
                 self.on_brain()
             if rl.is_mouse_button_pressed(rl.MouseButton.MOUSE_BUTTON_LEFT):
