@@ -10,6 +10,7 @@ still talking in a debate) and start it later with no synthesis delay.
 """
 
 import queue
+import random
 import re
 import subprocess
 import threading
@@ -68,6 +69,9 @@ def clean_for_speech(text):
     text = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", text)  # markdown links
     text = _EMOJI.sub("", text)
     text = text.replace("&", " and ")
+    # dashes and trailing dots: say them as a short spoken pause (a comma), not a flat run-on
+    text = re.sub(r"\s*(—|–|\s-\s|\.{3,}|…)\s*(?=\w)", ", ", text)
+    text = re.sub(r"(\.{2,}|…)", ".", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -228,7 +232,7 @@ class Speaker:
         """text -> (int16 PCM bytes, viseme timeline). Never raises."""
         try:
             with self._synth_lock:   # espeak-ng (phonemizer) isn't thread-safe
-                chunks = list(self.voice.synthesize(text, self.syn, include_alignments=True))
+                chunks = list(self.voice.synthesize(text, self._style(text), include_alignments=True))
             pcm = b"".join(c.audio_int16_bytes for c in chunks)
             pcm = self._boost(pcm)
             timeline, offset = [], 0
@@ -240,6 +244,26 @@ class Speaker:
         except Exception as e:  # never let one bad sentence kill the voice
             print(f"[tts] synth failed: {e}")
             return b"", []
+
+    def _style(self, text):
+        """Per-sentence delivery, so the voice doesn't read every line at the same even pace:
+        quick reactions ("Oh wow!", "Done!") come out fast, questions and exclamations are a bit
+        quicker and livelier, and every sentence drifts slightly in tempo like real speech."""
+        var = getattr(config, "TTS_VARIETY", 0.0)
+        if var <= 0:
+            return self.syn
+        t = text.rstrip(" \"')]")
+        speed, expr = config.TTS_SPEED, config.TTS_EXPRESSION
+        if len(t.split()) <= 3:
+            speed *= 0.9
+        elif t.endswith("?"):
+            speed *= 0.96
+            expr *= 1.1
+        elif t.endswith("!"):
+            speed *= 0.95
+            expr *= 1.15
+        speed *= 1 + random.uniform(-var, var)
+        return SynthesisConfig(length_scale=speed, noise_scale=expr, noise_w_scale=config.TTS_RHYTHM)
 
     @staticmethod
     def _boost(pcm):
@@ -274,10 +298,15 @@ class Speaker:
         """Breathing gap after a piece: longer after a full sentence than after a clause."""
         t = text.rstrip(" \"')]")
         if t.endswith(("?", "!")):
-            return config.TTS_PAUSE_S * 1.2
-        if t.endswith("."):
-            return config.TTS_PAUSE_S
-        return config.TTS_PAUSE_CLAUSE_S
+            gap = config.TTS_PAUSE_S * 1.2
+        elif t.endswith("."):
+            gap = config.TTS_PAUSE_S
+        else:
+            return config.TTS_PAUSE_CLAUSE_S
+        if len(t.split()) <= 3:   # "Oh!" / "Yeah." flows straight into the next sentence
+            gap *= 0.5
+        v = getattr(config, "TTS_VARIETY", 0.0) * 5   # people don't pause the same every time
+        return gap * (1 + random.uniform(-v, v))
 
     def _stream(self, gen):
         """The open pw-play stream for this reply (opened on first use)."""

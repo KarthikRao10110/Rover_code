@@ -94,10 +94,11 @@ LLM_THREADS_GEN = 3                # 3 beats 4 for generation on Pi 5 (memory bo
 LLM_THREADS_BATCH = 4
 HISTORY_TURNS = 8                  # user+assistant pairs kept in context
 
-TTS_VOICE = "models/piper/en_US-lessac-medium.onnx"
-TTS_SPEED = 0.92                   # >1 slower, <1 faster (Piper length_scale)
+TTS_VOICE = "models/piper/en_US-lessac-medium.onnx"   # Lyra: female. Nova sets a male voice in its local_config.py
+TTS_SPEED = 0.9                    # >1 slower, <1 faster (Piper length_scale); chatting is a bit quicker than reading
 TTS_EXPRESSION = 0.8               # pitch/intonation variation (Piper noise_scale; voice default 0.667)
-TTS_PAUSE_S = 0.3                  # breathing gap between sentences (x1.2 after ? and !)
+TTS_VARIETY = 0.05                 # random tempo/pause drift per sentence so it sounds talked, not read (0 = off)
+TTS_PAUSE_S = 0.22                 # breathing gap between sentences (x1.2 after ? and !, half after "Oh!")
 TTS_PAUSE_CLAUSE_S = 0.12          # gap after a piece cut at a comma (normal chat only)
 TTS_GAIN = 3.0                     # loudness boost via soft limiter (1 = off, 3 = ~+7 dB, 4 = ~+8 dB, rougher)
 TTS_RHYTHM = 1.0                   # timing variation between sounds (Piper noise_w; voice default 0.8)

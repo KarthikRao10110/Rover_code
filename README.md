@@ -17,13 +17,13 @@ Not in git (too big), put them in `models/`:
 | `models/llm/LFM3-Omni-2B-Q4_0.gguf` (optional 2nd brain) | Hugging Face `LiquidAI/LFM3-Omni-2B-GGUF`, Q4_0 |
 | `models/parakeet-tdt-0.6b-v2/` (encoder/decoder/joiner `.int8.onnx`, `tokens.txt`) | sherpa-onnx release `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` |
 | `models/silero_vad.onnx` | sherpa-onnx release `asr-models/silero_vad.onnx` |
-| `models/piper/en_US-lessac-medium.onnx` (+ `.onnx.json`) | Hugging Face `rhasspy/piper-voices` (Lyra's voice, the default) |
-| `models/piper/en_US-hfc_female-medium.onnx` (+ `.onnx.json`) | Hugging Face `rhasspy/piper-voices` (Nova's voice, set by `TTS_VOICE` in its `local_config.py`) |
+| `models/piper/en_US-lessac-medium.onnx` (+ `.onnx.json`) | Hugging Face `rhasspy/piper-voices` (Lyra's female voice, the default) |
+| `models/piper/en_US-hfc_male-medium.onnx` (+ `.onnx.json`) | Hugging Face `rhasspy/piper-voices` (Nova's male voice, set by `TTS_VOICE` in its `local_config.py`) |
 
 ```bash
 # Nova's voice
 cd models/piper && for e in onnx onnx.json; do
-  curl -fLO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.$e; done
+  curl -fLO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.$e; done
 ```
 
 llama.cpp: build `llama-server` (`cmake -B build -DGGML_NATIVE=ON && cmake --build build -j4 --target llama-server`)

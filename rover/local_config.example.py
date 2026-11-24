@@ -7,8 +7,9 @@ Below: the SECOND rover (different motor wiring, only a front and a rear ultraso
 ROBOT_NAME = "Nova"                  # its name is also its wake word ("Nova, what's...")
 LINK_KEY = "pick-any-secret"         # same on both robots
 
-# its own voice, so the audience can tell the two robots apart (Lyra keeps the default lessac voice)
-TTS_VOICE = "models/piper/en_US-hfc_female-medium.onnx"
+# its own voice, so the audience can tell the two robots apart: Nova is male, Lyra keeps the
+# default female lessac voice
+TTS_VOICE = "models/piper/en_US-hfc_male-medium.onnx"
 
 # the other robot
 PEER_NAME = "Lyra"
