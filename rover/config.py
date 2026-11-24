@@ -99,6 +99,7 @@ TTS_SPEED = 0.92                   # >1 slower, <1 faster (Piper length_scale)
 TTS_EXPRESSION = 0.8               # pitch/intonation variation (Piper noise_scale; voice default 0.667)
 TTS_PAUSE_S = 0.3                  # breathing gap between sentences (x1.2 after ? and !)
 TTS_PAUSE_CLAUSE_S = 0.12          # gap after a piece cut at a comma (normal chat only)
+TTS_GAIN = 3.0                     # loudness boost via soft limiter (1 = off, 3 = ~+7 dB, 4 = ~+8 dB, rougher)
 TTS_RHYTHM = 1.0                   # timing variation between sounds (Piper noise_w; voice default 0.8)
 CONTINUATION_WAIT_S = 1.5          # unfinished-sounding phrase: wait this long for the rest
 POST_SPEECH_MUTE_S = 0.6           # keep the mic muted briefly after talking (Bluetooth delay + echo tail)
@@ -113,7 +114,8 @@ WAKE_WINDOW_S = 20
 
 # --- Audio device -------------------------------------------------------------------
 # Bluetooth speaker+mic to keep connected (None = use whatever PipeWire defaults to).
-BT_AUDIO_MAC = "AC:EF:92:E6:D6:1A"   # Xiaomi Sound Outdoor
+BT_AUDIO_MAC = "41:42:04:5B:3E:70"   # "Pico" speaker (was AC:EF:92:E6:D6:1A, Xiaomi Sound Outdoor)
+BT_MUSIC_WHILE_SPEAKING = True       # speak in music mode (A2DP: louder, clearer); the mic is closed while talking
 MIC_SILENT_TIMEOUT_S = 3.0           # no audio data at all for this long -> mic is gone
 
 # --- Turn-taking ---------------------------------------------------------------------
@@ -163,7 +165,7 @@ MISHEARD_NAMES = {"lyra": ["lira", "laira", "leira", "lyre", "lyrah"],
                   "rover": ["rovers", "rova", "rober"]}
 # when the OTHER robot is named in "debate <name>" a looser match is fine (the word "debate" is
 # needed too), so a few real words that sound like it count as well
-_PEER_EXTRA = {"nova": ["noah", "nover", "novo", "no va", "nor va", "nova's"], "lyra": ["laura", "lara", "lyrics"]}
+_PEER_EXTRA = {"nova": ["noah", "nover", "novo", "no va", "nor va", "nova's", "lova", "nora", "noa"], "lyra": ["laura", "lara", "lyrics"]}
 if WAKE_WORDS is None:
     WAKE_WORDS = [ROBOT_NAME.lower()] + MISHEARD_NAMES.get(ROBOT_NAME.lower(), [])
 PEER_NAMES = ([PEER_NAME.lower()] + MISHEARD_NAMES.get(PEER_NAME.lower(), []) + _PEER_EXTRA.get(PEER_NAME.lower(), [])

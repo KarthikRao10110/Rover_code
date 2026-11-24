@@ -155,6 +155,27 @@ class PeerLink:
             self.log(f"[link] found {peer} at {self.host}")
             return self.host
 
+    def check(self):
+        """Is the other robot reachable RIGHT NOW? Tries the address we know first (generous
+        timeout: weak Wi-Fi), then searches the network, ignoring the rescan cooldown.
+        Returns (address, round-trip ms) or (None, None)."""
+        port = config.PEER_PORT or config.LINK_PORT
+        ping = (json.dumps({"type": "ping", "key": config.LINK_KEY}) + "\n").encode()
+        for host in dict.fromkeys(h for h in (self.host, config.PEER_HOST) if h):
+            t = time.monotonic()
+            try:
+                r = _exchange(host, port, ping, 3.0)
+            except (OSError, ValueError):
+                continue
+            if isinstance(r, dict) and r.get("ok") and r.get("name", "").lower() != config.ROBOT_NAME.lower():
+                self.host = host
+                return host, int((time.monotonic() - t) * 1000)
+        with self._scan_lock:
+            self._last_scan = 0.0
+        t = time.monotonic()
+        host = self.discover(port)
+        return (host, int((time.monotonic() - t) * 1000)) if host else (None, None)
+
     def close(self):
         if self.server:
             self.server.shutdown()

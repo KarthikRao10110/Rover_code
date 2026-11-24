@@ -141,11 +141,22 @@ def main():
             # strict turn-taking: the mic is muted while the robot talks (+ a short echo tail)
             unmute_timer = [None]
 
+            # Music mode: the mic is CLOSED while talking, so the speaker can switch to A2DP
+            # (louder, clearer). Reopening the mic afterwards switches it back to call mode.
+            from .audio import music_mode
+            music = bool(config.BT_AUDIO_MAC and config.BT_MUSIC_WHILE_SPEAKING)
+            listener.close_when_muted = music
+            if music:
+                speaker.before_stream = lambda: music_mode(log=log)
+
             def on_speaking(active):
                 if unmute_timer[0]:
                     unmute_timer[0].cancel()
                 if active:
                     listener.muted = True
+                    if music:   # start switching while the first sentence is being synthesized
+                        threading.Thread(target=lambda: (time.sleep(0.15), music_mode(log=log)),
+                                         name="music-mode", daemon=True).start()
                 else:
                     unmute_timer[0] = threading.Timer(config.POST_SPEECH_MUTE_S,
                                                       lambda: setattr(listener, "muted", False))

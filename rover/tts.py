@@ -85,6 +85,7 @@ class Speaker:
                                    noise_w_scale=config.TTS_RHYTHM)  # livelier, less "announcement"
         self.rate = self.voice.config.sample_rate
         self.on_state = on_state or (lambda speaking: None)
+        self.before_stream = None         # called (blocking) before each pw-play stream opens
         self._text_q = queue.Queue()
         self._audio_q = queue.Queue(maxsize=3)
         self._gen = 0                     # bumps on cancel(); stale work is dropped
@@ -229,6 +230,7 @@ class Speaker:
             with self._synth_lock:   # espeak-ng (phonemizer) isn't thread-safe
                 chunks = list(self.voice.synthesize(text, self.syn, include_alignments=True))
             pcm = b"".join(c.audio_int16_bytes for c in chunks)
+            pcm = self._boost(pcm)
             timeline, offset = [], 0
             for c in chunks:
                 if c.phoneme_alignments:
@@ -238,6 +240,16 @@ class Speaker:
         except Exception as e:  # never let one bad sentence kill the voice
             print(f"[tts] synth failed: {e}")
             return b"", []
+
+    @staticmethod
+    def _boost(pcm):
+        """Make the voice louder: gain + tanh soft limiter (peaks round off instead of clipping)."""
+        g = getattr(config, "TTS_GAIN", 1.0)
+        if g <= 1.0 or not pcm:
+            return pcm
+        a = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        a = np.tanh(g * a) / np.tanh(g)
+        return (np.clip(a, -1, 1) * 32767).astype(np.int16).tobytes()
 
     def _synth_loop(self):
         while True:
@@ -272,6 +284,11 @@ class Speaker:
         p = self._proc
         if p is None or self._stream_gen != gen or p.poll() is not None:
             self._close_stream(kill=True)
+            if self.before_stream:
+                try:
+                    self.before_stream()      # e.g. switch the BT speaker to music mode first
+                except Exception as e:
+                    print(f"[tts] before_stream failed: {e}")
             p = self._proc = subprocess.Popen(
                 ["pw-play", "--raw", "--rate", str(self.rate), "--channels", "1",
                  "--format", "s16", "-"],

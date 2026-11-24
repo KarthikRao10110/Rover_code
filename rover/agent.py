@@ -207,6 +207,10 @@ def _peer_re():
 
 
 RE_PEER = _peer_re()
+# "are you connected to Nova?", "can you reach Nova", "is Nova online", "check the link to Nova"
+# (only when the other robot is mentioned too: RE_PEER)
+RE_LINK_CHECK = re.compile(r"\b(connect\w*|reach\w*|online|offline|link\w*|ping\w*|in touch|contact|"
+                           r"find|see|talk to|speak to|hear)\b", re.I)
 # "switch your brain", "change model", "use your other brain"
 RE_SWITCH_BRAIN = re.compile(r"\b(switch|change|swap|toggle)\b.{0,20}\b(brains?|models?)\b|"
                              r"\buse (your|the) (other|second|different|new) (brain|model)\b", re.I)
@@ -217,7 +221,7 @@ RE_SIDE_AGAINST = re.compile(r"\byou (?:argue|take|are|be|go) (?:the )?(?:agains
 RE_PAIR = re.compile(r"\b(pair|pear|peer|paired|bear|robots?)\s+debat\w*\b|\bdebate\s+(with\s+)?each other\b", re.I)
 
 # --- confirming the debate topic before starting (background noise used to become the topic)
-SETUP_TIMEOUT_S = 40                 # no answer for this long -> forget the half-started debate
+SETUP_TIMEOUT_S = 60                 # no answer for this long (after I stop talking) -> forget it
 SETUP_MAX_TRIES = 3                  # unclear answers before giving up
 RE_YES = re.compile(r"^\W*(yes|yeah|yea|yep|yup|ya|sure|correct|right|that's right|exactly|ok|okay|"
                     r"go|go ahead|start|start it|do it|let's go|lets go|let's do it|absolutely|"
@@ -548,7 +552,8 @@ class Agent:
         self.log(f"[user] {text}")
 
         if self._setup is not None:               # asking for / confirming a debate topic
-            if time.monotonic() - self._setup["asked"] > SETUP_TIMEOUT_S:
+            # count from when I finished asking, not from when I started (slow speech ate the time)
+            if time.monotonic() - max(self._setup["asked"], self.speaker.last_spoke) > SETUP_TIMEOUT_S:
                 self.log("[debate setup] no answer in time, dropped")
                 self._setup = None
             else:
@@ -559,13 +564,26 @@ class Agent:
             self.switch_brain()
             return
 
-        # robot vs robot debate ("Rover, debate Nova about homework", "start pair debate")
-        if st.mode == "normal" and (RE_PAIR.search(text) or (RE_DEBATE_ON.search(text) and RE_PEER.search(text))):
+        # robot vs robot debate ("Rover, debate Nova about homework", "start pair debate").
+        # Also works in the middle of a debate with a person ("debate with Nova, not with me").
+        if st.mode in ("normal", "debate") and (RE_PAIR.search(text) or (RE_DEBATE_ON.search(text) and RE_PEER.search(text))):
             if not (self.link and self.link.configured()):
                 self.speaker.say("I don't know where the other robot is, so I can't start a pair debate.")
                 return
+            if st.mode == "debate":
+                self.log("[mode] leaving the debate with the user: they asked for a debate with the other robot")
+                topic = st.debate_topic
+                self.set_mode("normal")
+                if not extract_topic(text) and topic:   # keep the topic we already agreed on
+                    self._begin_setup("robot", topic, "against" if RE_SIDE_AGAINST.search(text) else "for")
+                    return
             side = "against" if RE_SIDE_AGAINST.search(text) else "for"
             self._begin_setup("robot", extract_topic(text), side)
+            return
+
+        # "are you connected to Nova?": actually test the link instead of letting the LLM guess
+        if st.mode == "normal" and RE_LINK_CHECK.search(text) and RE_PEER.search(text):
+            self.check_link()
             return
 
         # keyword mode switches (instant, no LLM needed to decide)
@@ -583,6 +601,25 @@ class Agent:
             return
 
         self._respond(text)
+
+    def check_link(self):
+        """Test the robot-to-robot link right now and say the real result."""
+        peer = config.PEER_NAME or "the other robot"
+        if not (self.link and self.link.configured()):
+            self.log("[link check] no other robot configured")
+            self.speaker.say(f"I haven't been told how to find {peer}, so I can't connect to it.")
+            return
+        self.speaker.say(f"Let me check my link to {peer}.")
+        host, ms = self.link.check()
+        if host:
+            self.log(f"[link check] {peer} answered at {host} in {ms} ms")
+            slow = " The Wi-Fi is a bit slow, though." if ms > 500 else ""
+            self.speaker.say(f"Yes, I'm connected to {peer}. It answered right away.{slow}" if ms <= 500
+                             else f"Yes, I'm connected to {peer}.{slow}")
+        else:
+            self.log(f"[link check] {peer} not reachable")
+            self.speaker.say(f"No, I can't reach {peer} right now. Make sure it's switched on, "
+                             f"its app is running, and it's on the same Wi-Fi as me.")
 
     # ---- setting up a debate: get the topic and have the user confirm it ----------------
     def _setup_say(self, msg):

@@ -59,33 +59,62 @@ def make_vad(cfg: ListenerConfig):
     return sherpa_onnx.VoiceActivityDetector(c, buffer_size_in_seconds=60)
 
 
-def mic_chunks(target=None, silent_timeout=3.0):
+def mic_chunks(target=None, silent_timeout=3.0, paused=None, grace=4.0):
     """Yield float32 mono 16 kHz chunks of WINDOW samples from PipeWire.
+
+    While paused() is True the recording is CLOSED (so a Bluetooth speaker can stay in music
+    mode) and None is yielded every ~50 ms; it reopens when paused() turns False.
     Raises RuntimeError if the mic delivers no data for silent_timeout seconds
-    (e.g. Bluetooth dropped: PipeWire then falls back to a source that never sends audio)."""
+    (e.g. Bluetooth dropped: PipeWire then falls back to a source that never sends audio).
+    Right after (re)opening, `grace` extra seconds are allowed (Bluetooth profile switch)."""
     cmd = ["pw-record", "--rate", str(RATE), "--channels", "1",
            "--format", "s16", "--raw", "--latency", "32ms"]
     if target:
         cmd += ["--target", target]
     cmd.append("-")
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    fd = p.stdout.fileno()
     nbytes = WINDOW * 2
+    p = None
+
+    def close():
+        nonlocal p
+        if p:
+            p.terminate()
+            try:
+                p.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                p.kill()
+            p = None
+
     try:
         while True:
+            if paused and paused():
+                close()
+                time.sleep(0.05)
+                yield None
+                continue
+            if p is None:
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                deadline = time.monotonic() + silent_timeout + grace
+            fd = p.stdout.fileno()
             buf = b""
             while len(buf) < nbytes:
-                ready, _, _ = select.select([fd], [], [], silent_timeout)
+                if paused and paused():
+                    break
+                ready, _, _ = select.select([fd], [], [], 0.1)
                 if not ready:
-                    raise RuntimeError(f"no audio from microphone for {silent_timeout:.0f} s")
+                    if time.monotonic() > deadline:
+                        raise RuntimeError(f"no audio from microphone for {silent_timeout:.0f} s")
+                    continue
                 chunk = os.read(fd, nbytes - len(buf))
                 if not chunk:
                     raise RuntimeError("microphone stream ended (device disconnected?)")
                 buf += chunk
+                deadline = time.monotonic() + silent_timeout
+            if len(buf) < nbytes:
+                continue                          # paused mid-read: drop the partial chunk
             yield np.frombuffer(buf, dtype=np.int16).astype(np.float32) / 32768.0
     finally:
-        p.terminate()
-        p.wait()
+        close()
 
 
 class Listener:
@@ -96,6 +125,7 @@ class Listener:
         self.recognizer = recognizer or make_recognizer(self.cfg.threads)
         self.vad = make_vad(self.cfg)
         self.muted = False          # half-duplex fallback: drop audio while True
+        self.close_when_muted = False  # True: close the recording while muted (BT music mode)
         self.last_stats = {}
         self.level = 0.0            # live mic loudness (RMS) for the face
         self.partial_every = partial_every
@@ -122,13 +152,20 @@ class Listener:
 
     def utterances(self, chunks=None):
         """Yield one transcript per spoken phrase. `chunks` defaults to the live mic."""
-        chunks = chunks if chunks is not None else mic_chunks(self.cfg.mic_target, self.cfg.silent_timeout)
+        chunks = chunks if chunks is not None else mic_chunks(
+            self.cfg.mic_target, self.cfg.silent_timeout,
+            paused=lambda: self.muted and self.close_when_muted)
         self._phrase_gen = 0
         preroll, live, in_speech, since_partial = [], [], False, 0.0
         ring = np.zeros(RING_S * RATE, dtype=np.float32)   # circular buffer of fed audio
         fed = 0                                             # samples fed to the VAD so far
         dt = WINDOW / RATE
         for chunk in chunks:
+            if chunk is None:                   # recording closed while muted
+                self.level = 0.0
+                self.vad.reset()
+                fed = 0
+                continue
             self.level = float(np.sqrt(np.mean(chunk**2)))
             if self.muted:
                 self.vad.reset()

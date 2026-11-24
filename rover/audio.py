@@ -1,6 +1,15 @@
-"""Keep the Bluetooth speaker/mic connected."""
+"""Keep the Bluetooth speaker/mic connected, and switch it between music and call mode.
 
+A Bluetooth speaker can't play in music mode (A2DP: stereo, loud, clear) while its mic is in
+use: the mic only works in call mode (HFP: 8-16 kHz, quieter). WirePlumber switches to call mode
+by itself ~0.5 s after a recording opens. So the rover closes the mic while it talks and calls
+music_mode() before the first word; reopening the mic afterwards switches back to call mode.
+"""
+
+import json
+import re
 import subprocess
+import threading
 import time
 
 from . import config
@@ -51,3 +60,59 @@ def ensure_bt(log=print, timeout=20):
 def mic_target():
     """PipeWire source to record from: the BT mic if configured, else the default."""
     return f"bluez_input.{config.BT_AUDIO_MAC}" if config.BT_AUDIO_MAC else None
+
+
+_mode_lock = threading.Lock()
+
+
+def _card():
+    return "bluez_card." + config.BT_AUDIO_MAC.replace(":", "_")
+
+
+def _pactl_json(*args):
+    out = subprocess.run(["pactl", "-f", "json", *args], capture_output=True, text=True, timeout=5).stdout
+    return json.loads(out or "[]")
+
+
+def _music_ready(card):
+    """True when the card is in an A2DP profile and its music-quality sink exists."""
+    cards = [c for c in _pactl_json("list", "cards") if c.get("name") == card]
+    if not cards or not cards[0].get("active_profile", "").startswith("a2dp-sink"):
+        return False, cards[0] if cards else None
+    prefix = "bluez_output." + config.BT_AUDIO_MAC.replace(":", "_")
+    for sink in _pactl_json("list", "sinks", "short"):
+        m = re.search(r"(\d+)Hz", sink.get("sample_specification", ""))
+        if sink.get("name", "").startswith(prefix) and m and int(m.group(1)) >= 32000:  # call mode: 8/16 kHz
+            return True, cards[0]
+    return False, cards[0]
+
+
+def music_mode(timeout=4.0, log=print):
+    """Switch the Bluetooth speaker to music mode (A2DP) and wait until it's ready.
+    Call it only while the mic is closed. Safe to call repeatedly; returns True when ready."""
+    if not (config.BT_AUDIO_MAC and getattr(config, "BT_MUSIC_WHILE_SPEAKING", False)):
+        return False
+    with _mode_lock:
+        try:
+            card = _card()
+            ready, info = _music_ready(card)
+            if ready:
+                return True
+            if not info:
+                return False                      # speaker not connected
+            profiles = info.get("profiles", {})
+            name = "a2dp-sink" if profiles.get("a2dp-sink", {}).get("available", True) else \
+                next((p for p in profiles if p.startswith("a2dp-sink")), None)
+            if not name:
+                return False
+            subprocess.run(["pactl", "set-card-profile", card, name], capture_output=True, timeout=5)
+            end = time.monotonic() + timeout
+            while time.monotonic() < end:
+                if _music_ready(card)[0]:
+                    time.sleep(0.1)               # let the default sink settle on the new node
+                    return True
+                time.sleep(0.05)
+            log("[audio] speaker didn't switch to music mode in time; speaking in call mode")
+        except Exception as e:
+            log(f"[audio] music mode switch failed: {e}")
+        return False
