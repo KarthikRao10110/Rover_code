@@ -8,8 +8,7 @@ long topic out loud). Run on either rover while ./start_rover.sh is running; tha
 
 import argparse
 
-from rover import config
-from rover.link import PeerLink
+from rover.link import send_local
 
 
 def main():
@@ -21,9 +20,9 @@ def main():
     if not args.stop and not args.topic:
         ap.error("give a topic, or --stop")
     msg = {"type": "stop"} if args.stop else {"type": "host", "topic": args.topic, "side": args.side}
-    reply = PeerLink(on_message=None).send(msg, host="127.0.0.1", tries=1, timeout=30)
+    reply = send_local(msg)
     if reply is None:
-        print(f"The rover isn't running (nothing on port {config.LINK_PORT}). Start it with ./start_rover.sh")
+        print("The rover isn't running. Start it with ./start_rover.sh")
     else:
         print(reply.get("message") or reply)
 

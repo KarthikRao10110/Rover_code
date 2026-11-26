@@ -13,7 +13,7 @@ TTS_VOICE = "models/piper/en_US-hfc_male-medium.onnx"
 
 # the other robot
 PEER_NAME = "Lyra"
-PEER_HOST = "maximus.local"          # Lyra's hostname (run `hostname` on it) or its IP address
+PEER_BT_MAC = "2C:CF:67:DA:25:71"    # Lyra's Bluetooth address (`bluetoothctl show` on Lyra)
 
 # --- motors (L298N, BCM pin numbers) -- set to this robot's wiring
 LEFT_IN1, LEFT_IN2, LEFT_EN = 17, 27, 12

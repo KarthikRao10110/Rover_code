@@ -184,7 +184,7 @@ def main():
             threading.Thread(target=agent.run, name="agent", daemon=True).start()
             log(f"ready  (motors: {'yes' if rover else 'no'}, sensors: {'yes' if sensors else 'no'}, "
                 f"wake word: {'yes' if agent.wake_word else 'no'}, "
-                f"other robot: {config.PEER_NAME + ' @ ' + config.PEER_HOST if link and link.configured() else 'not set'})")
+                f"other robot: {config.PEER_NAME + ' @ bluetooth ' + config.PEER_BT_MAC if link and link.configured() else 'not set'})")
             speaker.say(f"Hi, I'm {config.ROBOT_NAME}. I'm awake and listening.")
         except Exception as e:
             log(f"[boot] FAILED: {type(e).__name__}: {e}")

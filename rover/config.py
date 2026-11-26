@@ -128,12 +128,12 @@ BUSY_MAX_PHRASE_S = 3.0              # while thinking/debating, skip phrases lon
 SAVE_UTTERANCES = True               # keep the last 30 heard phrases in logs/utterances/ (debugging STT)
 
 # --- Robot vs robot debate -------------------------------------------------------------
-# The two rovers talk over the network (same Wi-Fi) so each always gets the other's exact words;
+# The two rovers send each other their exact words directly over Bluetooth (pair the Pis once);
 # they still speak out loud for the audience. Set PEER_* on each robot in rover/local_config.py.
 PEER_NAME = None                     # the other robot's name, e.g. "Nova"
-PEER_HOST = None                     # its address, e.g. "nova.local" or "192.168.1.42"
-LINK_PORT = 8765                     # both robots listen on this TCP port
-PEER_PORT = None                     # the other robot's port if different (testing two on one Pi)
+PEER_BT_MAC = None                   # the other Pi's Bluetooth address (`bluetoothctl show` on it)
+LINK_BT_CHANNEL = 22                 # RFCOMM channel both robots listen on (1-30)
+LINK_KEEPALIVE_S = 5.0               # the link stays connected; ping the other robot this often when idle
 LINK_KEY = "change-me"               # shared secret, must be the same on both robots
 ROBOT_DEBATE_ROUNDS = 3              # turns per robot (opening, rebuttal..., closing)
 ROBOT_DEBATE_WORDS = 30              # max length of each turn (turns are one sentence)

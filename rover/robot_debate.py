@@ -57,7 +57,7 @@ class RobotDebate:
     def start_as_host(self, topic, side="for", rounds=None):
         link = self.agent.link
         if not (link and link.configured()):
-            return "error: I don't know where the other robot is. Set PEER_NAME and PEER_HOST in local_config.py."
+            return "error: I don't know where the other robot is. Set PEER_NAME and PEER_BT_MAC in local_config.py."
         topic = (topic or "").strip(" .?!")
         if not topic:                      # (voice requests are confirmed in agent.py first)
             return "error: I need a topic first. What should we debate about?"
@@ -68,7 +68,7 @@ class RobotDebate:
         reply = link.send({"type": "start", "topic": topic, "side": other(side), "rounds": rounds,
                            "from": config.ROBOT_NAME})
         if not reply:
-            return f"error: I can't reach {self.peer}. Is it switched on and on the same Wi-Fi?"
+            return f"error: I can't reach {self.peer}. Is it switched on, paired, and close enough for Bluetooth?"
         if not reply.get("ok"):
             return f"error: {self.peer} can't debate right now ({reply.get('error', 'busy')})."
         self._begin(topic, side, rounds, host=True)

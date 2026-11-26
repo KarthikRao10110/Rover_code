@@ -101,12 +101,28 @@ the 4-sensor rover and a front+rear 2-sensor rover.
 ## Two rovers debating (Lyra and Nova)
 Both rovers run this same code; each has its own `rover/local_config.py` (name, motor pins,
 sensors, the other robot's address). See `rover/local_config.example.py`.
-They find each other by name (`PEER_HOST`, e.g. `raspberrypi.local`); if that fails, the rover scans
-its Wi-Fi network for the other robot (port 8765 + the shared `LINK_KEY`), so a changed IP doesn't matter.
+They send each other their exact words directly over **Bluetooth** (RFCOMM channel 22, Pi to Pi,
+no Wi-Fi needed), and still speak out loud for the audience. Every message carries the shared `LINK_KEY`.
+
+Bluetooth setup (once):
+1. On each Pi run `bluetoothctl show`. The `Controller` line is its address. Put the *other* Pi's
+   address in `PEER_BT_MAC` in `rover/local_config.py` (Lyra: `2C:CF:67:DA:25:71`).
+2. Pair them. On Lyra: `bluetoothctl discoverable on`. On Nova:
+   `bluetoothctl --timeout 15 scan on`, then `bluetoothctl pair <Lyra MAC>` and `bluetoothctl trust <Lyra MAC>`.
+   On Lyra: `bluetoothctl trust <Nova MAC>`. Accept the pairing prompt on both screens if one appears.
+3. Restart both rovers and say "Lyra, are you connected to Nova?". It says "over Bluetooth" when it works.
+
+The link stays connected the whole time: each robot connects as soon as it starts, pings the other
+every 5 s (`LINK_KEEPALIVE_S`), and reconnects by itself if the other robot is switched off or goes out
+of range (retrying every 2 s, slowing to every 30 s). `logs/rover.log` shows "[link] connected to Nova"
+or "no Bluetooth link to Nova" whenever that changes.
+
+The same Bluetooth radio also drives the speaker/mic. The debate messages are tiny, so the audio
+isn't affected. Keep the Pis within ~10 m.
+
 Speech-recognition slips of the names ("Noha", "Nohva", "Novah", "Noah"...) are in `MISHEARD_NAMES` in `rover/config.py`.
-They talk over Wi-Fi (TCP port 8765), so each always gets the other's exact words, and they
-still speak out loud for the audience. One talks at a time: while one is speaking, the other is
-already writing its answer, and starts talking as soon as the first one finishes.
+
+One talks at a time: while one is speaking, the other is already writing its answer, and starts talking as soon as the first one finishes.
 
 Start one:
 - by voice: "Lyra, start pair debate" (also "robot debate", "debate each other", or
@@ -124,7 +140,7 @@ Stop it: say "stop the debate", tap the screen, or `tools.debate --stop`.
 | `rover/main.py` | wires everything together, boot sequence |
 | `rover/agent.py` | brain: prompts, tools, routing, wake word, turn-taking |
 | `rover/robot_debate.py` | robot vs robot debate (turn order, sides, timing) |
-| `rover/link.py` | robot-to-robot messages over the network |
+| `rover/link.py` | robot-to-robot messages over Bluetooth (RFCOMM) |
 | `rover/local_config.py` | this robot's own settings (name, pins, sensors, peer) |
 | `rover/commands.py` | deterministic driving-command parser |
 | `rover/llm.py` | llama-server launcher + streaming client |

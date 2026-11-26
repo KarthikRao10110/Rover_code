@@ -615,13 +615,13 @@ class Agent:
         host, ms = self.link.check()
         if host:
             self.log(f"[link check] {peer} answered at {host} in {ms} ms")
-            slow = " The Wi-Fi is a bit slow, though." if ms > 500 else ""
-            self.speaker.say(f"Yes, I'm connected to {peer}. It answered right away.{slow}" if ms <= 500
-                             else f"Yes, I'm connected to {peer}.{slow}")
+            slow = " The Bluetooth link is a bit slow, though." if ms > 3000 else ""
+            self.speaker.say(f"Yes, I'm connected to {peer} over Bluetooth. It answered right away." if ms <= 3000
+                             else f"Yes, I'm connected to {peer} over Bluetooth.{slow}")
         else:
             self.log(f"[link check] {peer} not reachable")
             self.speaker.say(f"No, I can't reach {peer} right now. Make sure it's switched on, "
-                             f"its app is running, and it's on the same Wi-Fi as me.")
+                             f"its app is running, it's paired with me, and it's close enough for Bluetooth.")
 
     # ---- setting up a debate: get the topic and have the user confirm it ----------------
     def _setup_say(self, msg):
