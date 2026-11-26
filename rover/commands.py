@@ -104,7 +104,7 @@ def _one(part):
             else:
                 return None
         else:
-            args["distance_m"] = 0.5
+            args["distance_m"] = 0.25
         return ("move", args)
     return None
 
@@ -131,7 +131,7 @@ def parse(text):
         far = not re.search(r"\bcloser\b", text, re.I)
         return [("move", {"direction": "forward", "distance_m": 1.0 if far else 0.4})]
     if RE_AWAY.search(text):
-        return [("move", {"direction": "backward", "distance_m": 0.5})]
+        return [("move", {"direction": "backward", "distance_m": 0.25})]
     parts = [x for x in SPLIT.split(text) if x and x.strip()]
     out = []
     for part in parts:
@@ -175,11 +175,7 @@ def describe(cmd):
             return "Turning around."
         return f"Turning {a['direction']}" + (f" {d:g} degrees." if d != 90 else ".")
     if name == "move":
-        if "seconds" in a:
-            return f"Going {a['direction']} for {a['seconds']:g} seconds."
-        m = a.get("distance_m", 0.5)
-        dist = f"{m * 100:.0f} centimetres" if m < 1 else f"{m:g} metre" + ("s" if m != 1 else "")
-        return f"Going {a['direction']} {dist}."
+        return f"Going {a['direction']}."      # no distance/time spoken, just the direction
     return ""
 
 

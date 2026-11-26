@@ -129,7 +129,7 @@ def build_tools(robot_debate):
                            "you actually went and whether an obstacle stopped you.",
             "parameters": {"type": "object", "properties": {
                 "direction": {"type": "string", "enum": ["forward", "backward"]},
-                "distance_m": {"type": "number", "description": "Distance in metres, 0.1 to 3. Default 0.5."},
+                "distance_m": {"type": "number", "description": "Distance in metres, 0.1 to 3. Default 0.25."},
                 "speed": {"type": "string", "enum": ["slow", "normal", "fast"]},
             }, "required": ["direction"]}}},
         {"type": "function", "function": {
@@ -976,7 +976,7 @@ class Agent:
     def _tool_args(name, args):
         a = dict(args or {})
         if name == "move":
-            a.setdefault("distance_m", 0.5)
+            a.setdefault("distance_m", 0.25)
         return a
 
     def _wait_motion(self):
@@ -1010,7 +1010,7 @@ class Agent:
                     speed = SPEEDS.get(speed)
                 seconds = args.get("seconds")
                 res = self.rover.move(args.get("direction", "forward"),
-                                      None if seconds else args.get("distance_m", 0.5), seconds, speed)
+                                      None if seconds else args.get("distance_m", 0.25), seconds, speed)
             elif name == "turn":
                 res = self.rover.turn(args.get("direction", "left"), args.get("degrees", 90))
             else:
