@@ -809,8 +809,10 @@ class Agent:
             jobs = [("debate", None, config.SLOT_DEBATE), ("robot_debate", None, config.SLOT_ROBOT_DEBATE)]
         for kind, tools, slot in jobs:
             t = time.monotonic()
-            self.llm.warm_up(self.system_prompt(kind), tools, slot)
-            self.log(f"[llm] {kind} prompt warmed up in {time.monotonic() - t:.1f}s")
+            brain = getattr(self, "brain", None)
+            model = brain.cfg["model"] if brain else config.LLM["model"]
+            how = self.llm.warm_up_cached(self.system_prompt(kind), tools, slot, model, log=self.log)
+            self.log(f"[llm] {kind} prompt {how} in {time.monotonic() - t:.1f}s")
 
     def _note(self, text):
         st = self.state

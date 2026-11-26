@@ -1,5 +1,6 @@
 """llama-server process management + streaming OpenAI-style chat client with tool calls."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -10,9 +11,13 @@ import requests
 from . import config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Warmed-up prompt caches are saved here, so a restart restores them in seconds instead of
+# re-processing every system prompt (which took most of the 1-2 min startup).
+KV_CACHE_DIR = os.path.join(ROOT, "logs", "kv-cache")
 
 
 def server_cmd(cfg):
+    os.makedirs(KV_CACHE_DIR, exist_ok=True)   # llama-server refuses a --slot-save-path that doesn't exist
     return [
         config.LLAMA_SERVER,
         "-m", os.path.join(ROOT, cfg["model"]),
@@ -24,6 +29,7 @@ def server_cmd(cfg):
         "-np", str(cfg.get("slots", 1)),  # slots each keep their own cached prompt prefix
         "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",   # 8-bit KV cache: half the RAM
         "--reasoning-budget", "0",  # no hidden "thinking" tokens: answers start right away
+        "--slot-save-path", KV_CACHE_DIR,  # warm-up caches saved to / restored from disk
     ]
 
 
@@ -218,6 +224,40 @@ class ChatClient:
                         fn = tc.get("function", {})
                         slot["name"] += fn.get("name") or ""
                         slot["args"] += fn.get("arguments") or ""
+
+    def _slot_url(self, slot, action):
+        base = self.url.rsplit("/v1/", 1)[0]
+        return f"{base}/slots/{slot}?action={action}"
+
+    def warm_up_cached(self, system_prompt, tools, slot, model, log=print):
+        """Like warm_up, but restore the slot's cache from disk when the exact same model, prompt
+        and tools were warmed up before; otherwise warm up and save it for next time.
+        Returns "restored" or "warmed"."""
+        key = hashlib.sha1(json.dumps([os.path.basename(model), system_prompt, tools],
+                                      sort_keys=True).encode()).hexdigest()[:16]
+        name = f"slot{slot}-{key}.bin"
+        path = os.path.join(KV_CACHE_DIR, name)
+        if os.path.exists(path):
+            try:
+                r = self.session.post(self._slot_url(slot, "restore"), json={"filename": name}, timeout=60)
+                if r.status_code == 200:
+                    return "restored"
+                log(f"[llm] cache restore for slot {slot} failed ({r.status_code}), warming up instead")
+            except requests.RequestException as e:
+                log(f"[llm] cache restore for slot {slot} failed ({e}), warming up instead")
+        self.warm_up(system_prompt, tools, slot)
+        try:
+            os.makedirs(KV_CACHE_DIR, exist_ok=True)
+            r = self.session.post(self._slot_url(slot, "save"), json={"filename": name}, timeout=60)
+            if r.status_code == 200:
+                for old in os.listdir(KV_CACHE_DIR):      # drop this slot's outdated caches
+                    if old.startswith(f"slot{slot}-") and old != name:
+                        os.remove(os.path.join(KV_CACHE_DIR, old))
+            else:
+                log(f"[llm] cache save for slot {slot} failed ({r.status_code})")
+        except (requests.RequestException, OSError) as e:
+            log(f"[llm] cache save for slot {slot} failed ({e})")
+        return "warmed"
 
     def warm_up(self, system_prompt, tools, slot=None):
         """Process the (static) system prompt + tool list once so it sits in the KV cache.
